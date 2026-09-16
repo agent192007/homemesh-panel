@@ -13,11 +13,21 @@
 //  Build with env:demo.
 // ------------------------------------------------------------
 
+// Areas become pages, in this order, after Home.
+enum { AREA_LIVING, AREA_BEDROOM, AREA_KITCHEN };
+static const char *AREAS[] = { "Living Room", "Bedroom", "Kitchen" };
+static const uint8_t AREA_N = sizeof(AREAS) / sizeof(AREAS[0]);
+
+//                name            kind                  area          fav
 static const EntityDesc ENTITIES[] = {
-  { "Living Room", EntityKind::RGB },
-  { "Kitchen",     EntityKind::Dimmable },
-  { "Bedroom",     EntityKind::Toggle },
-  { "Ceiling Fan", EntityKind::Toggle },
+  { "Ceiling",    EntityKind::RGB,      AREA_LIVING,  true  },
+  { "Lamp",       EntityKind::Dimmable, AREA_LIVING,  false },
+  { "TV",         EntityKind::Toggle,   AREA_LIVING,  false },
+  { "Fan",        EntityKind::Toggle,   AREA_LIVING,  true  },
+  { "Bed Light",  EntityKind::Dimmable, AREA_BEDROOM, true  },
+  { "Night Lamp", EntityKind::Toggle,   AREA_BEDROOM, false },
+  { "Counter",    EntityKind::RGB,      AREA_KITCHEN, false },
+  { "Kettle",     EntityKind::Toggle,   AREA_KITCHEN, true  },
 };
 static const uint8_t ENTITY_N = sizeof(ENTITIES) / sizeof(ENTITIES[0]);
 
@@ -69,7 +79,11 @@ static void fake_task(void *) {
 
   uint32_t last_sensor = 0;
   uint32_t last_extern = millis();
-  float temp = 24.4f, hum = 47.0f;
+  float temp[MAX_AREAS], hum[MAX_AREAS];
+  for (uint8_t a = 0; a < AREA_N; a++) {
+    temp[a] = 22.0f + a * 1.6f;
+    hum[a] = 44.0f + a * 3.0f;
+  }
 
   for (;;) {
     Command c;
@@ -130,12 +144,16 @@ static void fake_task(void *) {
 
     if (now - last_sensor > 4000) {
       last_sensor = now;
-      temp += (float)(random(-10, 11)) / 100.0f;
-      hum += (float)(random(-10, 11)) / 50.0f;
-      if (temp < 21) temp = 21; if (temp > 28) temp = 28;
-      if (hum < 35) hum = 35; if (hum > 65) hum = 65;
-      post(EventType::Temperature, 0, 0, temp);
-      post(EventType::Humidity, 0, 0, hum);
+      for (uint8_t a = 0; a < AREA_N; a++) {
+        temp[a] += (float)(random(-10, 11)) / 100.0f;
+        hum[a] += (float)(random(-10, 11)) / 50.0f;
+        if (temp[a] < 21) temp[a] = 21;
+        if (temp[a] > 28) temp[a] = 28;
+        if (hum[a] < 35) hum[a] = 35;
+        if (hum[a] > 65) hum[a] = 65;
+        post(EventType::Temperature, a, 0, temp[a]);
+        post(EventType::Humidity, a, 0, hum[a]);
+      }
     }
 
     // Every 20s, change something "from Home Assistant" so the demo
@@ -161,6 +179,10 @@ void transport_start() {
   s_power[1] = true;  s_bright[1] = 130;
   s_power[2] = false;
   s_power[3] = false;
+  s_power[4] = false; s_bright[4] = 90;
+  s_power[5] = false;
+  s_power[6] = true;  s_bright[6] = 255; s_color[6] = pack_rgb(120, 200, 255);
+  s_power[7] = false;
 
   Serial.println("[demo] simulated transport - no network");
   xTaskCreatePinnedToCore(fake_task, "fake", 4096, nullptr, 0, nullptr, 0);
@@ -190,5 +212,7 @@ void transport_run_automation(uint8_t index) {
 
 uint8_t transport_entity_count() { return ENTITY_N; }
 const EntityDesc *transport_entity(uint8_t i) { return &ENTITIES[i]; }
+uint8_t transport_area_count() { return AREA_N; }
+const char *transport_area(uint8_t i) { return AREAS[i]; }
 uint8_t transport_automation_count() { return AUTOMATION_N; }
 const AutomationDesc *transport_automation(uint8_t i) { return &AUTOMATIONS[i]; }

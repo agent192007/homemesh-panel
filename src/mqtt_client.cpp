@@ -259,11 +259,13 @@ void mqtt_send_brightness(uint8_t entity, uint8_t value) {
 //  transport.h shim. Legacy path: no colour, no automations. Kept
 //  building so env:panel stays flashable while ha_client lands.
 // ------------------------------------------------------------
+static const char *MQTT_AREAS[] = { "Home" };
+
 static const EntityDesc MQTT_ENTITIES[ENT_COUNT] = {
-  { "Living Room", EntityKind::Dimmable },
-  { "Kitchen",     EntityKind::Toggle },
-  { "Bedroom",     EntityKind::Toggle },
-  { "Ceiling Fan", EntityKind::Toggle },
+  { "Living Room", EntityKind::Dimmable, 0, true },
+  { "Kitchen",     EntityKind::Toggle,   0, true },
+  { "Bedroom",     EntityKind::Toggle,   0, true },
+  { "Ceiling Fan", EntityKind::Toggle,   0, true },
 };
 
 void transport_start() { mqtt_start(); }
@@ -274,5 +276,7 @@ void transport_send_color(uint8_t, uint8_t, uint8_t, uint8_t) {}
 void transport_run_automation(uint8_t) {}
 uint8_t transport_entity_count() { return ENT_COUNT; }
 const EntityDesc *transport_entity(uint8_t i) { return &MQTT_ENTITIES[i]; }
+uint8_t transport_area_count() { return 1; }
+const char *transport_area(uint8_t i) { return MQTT_AREAS[i]; }
 uint8_t transport_automation_count() { return 0; }
 const AutomationDesc *transport_automation(uint8_t) { return nullptr; }

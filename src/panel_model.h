@@ -9,6 +9,15 @@
 
 #define MAX_ENTITIES 12
 #define MAX_AUTOMATIONS 8
+#define MAX_AREAS 6
+// Home page + one per area.
+#define MAX_PAGES (1 + MAX_AREAS)
+// A favourite appears twice: on Home and on its room page.
+#define MAX_TILES (MAX_ENTITIES * 2)
+// Devices shown per page, 2 columns x 3 rows. Pages cannot scroll -
+// vertical is spent on the Devices/Automations switch - so anything
+// past this is not reachable and is dropped at build time.
+#define MAX_PER_PAGE 6
 
 // What controls an entity gets. Drives which widgets its page builds,
 // so adding a capability is a change here plus one page builder.
@@ -30,8 +39,8 @@ enum class EventType : uint8_t {
   Power,             // entity, value = 1 on, 0 off
   Brightness,        // entity, value = 0-255
   Color,             // entity, value = packed 0xRRGGBB
-  Temperature,       // fvalue
-  Humidity,          // fvalue
+  Temperature,       // entity = AREA index, fvalue
+  Humidity,          // entity = AREA index, fvalue
   AutomationRan,     // entity = automation index (feedback flash)
 };
 
@@ -54,9 +63,14 @@ static inline uint8_t rgb_b(int32_t v) { return (uint8_t)v; }
 // Descriptors are supplied by the transport. Today they are static
 // tables; once layouts are authored on the PC and stored in NVS the
 // transport will populate them at boot and nothing above has to change.
+// Areas mirror Home Assistant's own area registry, so the desktop
+// authoring tool can populate these straight from HA rather than
+// having rooms hand-listed here.
 struct EntityDesc {
   const char *name;
   EntityKind kind;
+  uint8_t area;      // index into the transport's area table
+  bool favourite;    // also appears on the Home page
 };
 
 struct AutomationDesc {

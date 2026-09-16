@@ -29,3 +29,7 @@ uint8_t transport_entity_count();
 const EntityDesc *transport_entity(uint8_t i);
 uint8_t transport_automation_count();
 const AutomationDesc *transport_automation(uint8_t i);
+
+// Areas become the device pages, in this order, after the Home page.
+uint8_t transport_area_count();
+const char *transport_area(uint8_t i);
