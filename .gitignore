@@ -8,4 +8,3 @@ mqtt_simulated_devices/.env
 mqtt_simulated_devices/.venv
 __pycache__/
 tools/.env
-include/ha_layout.h

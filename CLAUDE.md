@@ -133,19 +133,41 @@ The hotspot makes the demo independent of the venue.
   bridging onto a virtual ICS adapter is painful and Hyper-V can fight
   with Mobile Hotspot. Pull the image while internet is available.
 
+### The laptop is the whole environment (decided 16 Sep)
+
+Home Assistant, the hotspot, the discovery tool and the build all live
+on the **demo laptop**. The wired desktop is not part of the runtime
+picture. This was decided deliberately, because the obvious-looking
+alternative is a trap:
+
+- Running HA on the desktop for development and moving it to the laptop
+  for the demo means HA's address changes from `192.168.100.x` to
+  `192.168.137.1`. `HA_HOST` is compiled into `secrets.h`, so that is a
+  reflash on demo morning.
+- **So the hotspot is the development network too, not just the demo
+  network.** The panel sits on `192.168.137.1` from day one and nothing
+  about the network changes on the day.
+- Flashing is serial, so the panel can be plugged into whichever
+  machine is convenient regardless of which network it joins.
+
+`tools/ha_discover.py` therefore runs on the laptop against
+`http://localhost:8123`.
+
 ### Current infrastructure state (16 Sep)
 
-- **No Home Assistant instance exists yet.** Nothing on 8123 locally or
-  at `192.168.100.9`. Standing HA up is step zero and is a bigger task
-  than the WebSocket spike.
-- **The dev desktop has no wireless interface** (`netsh wlan show
-  interfaces` reports none). It is on wired Ethernet at
-  `192.168.100.4`, so it cannot host the hotspot. A separate
-  WiFi-capable laptop, a USB WiFi dongle, or a travel router is needed.
+- **No Home Assistant instance exists yet.** Standing HA up on the
+  laptop is step zero and is a bigger task than the WebSocket spike.
+- The dev desktop has no wireless interface (`netsh wlan show
+  interfaces` reports none), which is why it cannot be the demo machine
+  and why the split above resolves toward the laptop.
 - The existing MQTT broker is at `192.168.100.9` — a separate machine,
   with no HA attached. Everything to date has been panel to broker to
   Python simulator, with HA never in the loop.
 - HA host URL and long-lived access token: not yet obtained.
+- **`include/ha_layout.h` is committed, not gitignored.** It is
+  generated, but it is also the only record of the demo layout, and a
+  build that needs HA running to succeed is a bad thing to depend on at
+  9am. It contains entity_ids and friendly names, no credentials.
 
 ## Toolchain
 
