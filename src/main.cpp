@@ -2,8 +2,8 @@
 #include <lvgl.h>
 
 #include "display_driver.h"
-#include "mqtt_client.h"
 #include "touch_driver.h"
+#include "transport.h"
 #include "ui/dashboard.h"
 
 // 1 = landscape (320x240). 0 = native portrait, 3 = landscape
@@ -19,13 +19,14 @@ void setup() {
   display_init(PANEL_ROTATION);
   touch_init(PANEL_ROTATION);
 
-  dashboard_create(mqtt_send_power, mqtt_send_brightness);
-  mqtt_start();  // network runs on its own task, never blocks this loop
+  // Transport first: the UI reads its entity table to build pages.
+  transport_start();
+  dashboard_create();
 }
 
 void loop() {
   PanelEvent e;
-  while (mqtt_next_event(&e)) dashboard_apply(e);
+  while (transport_next_event(&e)) dashboard_apply(e);
 
   lv_timer_handler();
   delay(5);

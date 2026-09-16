@@ -1,5 +1,7 @@
 #include "mqtt_client.h"
 
+#include "transport.h"
+
 #include <Arduino.h>
 #include <PubSubClient.h>
 #include <WiFi.h>
@@ -252,3 +254,25 @@ void mqtt_send_brightness(uint8_t entity, uint8_t value) {
   Command c = {entity, true, value};
   xQueueSend(cmd_q, &c, 0);
 }
+
+// ------------------------------------------------------------
+//  transport.h shim. Legacy path: no colour, no automations. Kept
+//  building so env:panel stays flashable while ha_client lands.
+// ------------------------------------------------------------
+static const EntityDesc MQTT_ENTITIES[ENT_COUNT] = {
+  { "Living Room", EntityKind::Dimmable },
+  { "Kitchen",     EntityKind::Toggle },
+  { "Bedroom",     EntityKind::Toggle },
+  { "Ceiling Fan", EntityKind::Toggle },
+};
+
+void transport_start() { mqtt_start(); }
+bool transport_next_event(PanelEvent *e) { return mqtt_next_event(e); }
+void transport_send_power(uint8_t entity, bool on) { mqtt_send_power(entity, on); }
+void transport_send_brightness(uint8_t entity, uint8_t v) { mqtt_send_brightness(entity, v); }
+void transport_send_color(uint8_t, uint8_t, uint8_t, uint8_t) {}
+void transport_run_automation(uint8_t) {}
+uint8_t transport_entity_count() { return ENT_COUNT; }
+const EntityDesc *transport_entity(uint8_t i) { return &MQTT_ENTITIES[i]; }
+uint8_t transport_automation_count() { return 0; }
+const AutomationDesc *transport_automation(uint8_t) { return nullptr; }
