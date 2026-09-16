@@ -10,8 +10,10 @@
 //
 //  A fixed header lives on lv_layer_top() so it is drawn once and
 //  stays put across both screens. Each screen owns an lv_tileview
-//  below it, scrolling horizontally only - which leaves vertical
-//  drags free to surface as gestures and swap the screens.
+//  below it, used purely as a positioned container: tiles are created
+//  LV_DIR_NONE so it never scrolls. All paging - horizontal between
+//  pages, vertical between screens - is driven by gestures and jumps
+//  instantly, with no animation anywhere.
 // ------------------------------------------------------------
 static const lv_coord_t HEADER_H = 28;
 static const lv_coord_t BODY_H = 240 - HEADER_H;
@@ -55,6 +57,18 @@ static lv_obj_t *scr_autos;
 // update from the screen we are switching *to*, not the one LVGL
 // still considers active.
 static lv_obj_t *cur_screen;
+
+// Paging is driven by gestures, not by scrolling, so the current page
+// has to be tracked here - the tileview is only used as a positioned
+// container now.
+static uint8_t dev_page, dev_pages;
+static uint8_t auto_page, auto_pages;
+
+// True while a finger is down on a slider or the colour wheel. Those
+// widgets capture the drag, but LVGL still emits a gesture that
+// bubbles to the screen - without this guard, dragging a slider
+// sideways would also flip the page.
+static bool input_captured;
 static lv_obj_t *tv_devices;
 static lv_obj_t *tv_autos;
 
@@ -137,25 +151,54 @@ static void unflash_cb(lv_timer_t *t) {
 
 static void update_title();
 
-static void tile_changed_cb(lv_event_t *e) {
-  (void)e;
+// Sliders and the colour wheel swallow the drag but LVGL still reports
+// a gesture; flag the press so gesture_cb can ignore it.
+static void capture_cb(lv_event_t *e) {
+  lv_event_code_t c = lv_event_get_code(e);
+  if (c == LV_EVENT_PRESSED) input_captured = true;
+  else input_captured = false;  // RELEASED / PRESS_LOST
+}
+
+// Widgets that own their drag must suppress page gestures.
+static void add_capture(lv_obj_t *o) {
+  lv_obj_add_event_cb(o, capture_cb, LV_EVENT_PRESSED, NULL);
+  lv_obj_add_event_cb(o, capture_cb, LV_EVENT_RELEASED, NULL);
+  lv_obj_add_event_cb(o, capture_cb, LV_EVENT_PRESS_LOST, NULL);
+}
+
+static void goto_page(lv_obj_t *tv, uint8_t page) {
+  lv_obj_set_tile_id(tv, page, 0, LV_ANIM_OFF);
   update_title();
 }
 
-// Vertical swipe swaps Devices <-> Automations. Horizontal is consumed
-// by the tileview, so only LV_DIR_TOP/BOTTOM reach here.
+// All four directions are handled here. Tiles are created LV_DIR_NONE
+// so the tileview never scrolls under the finger - pages jump.
 static void gesture_cb(lv_event_t *e) {
+  if (input_captured) return;
+
   lv_dir_t d = lv_indev_get_gesture_dir(lv_indev_get_act());
   lv_obj_t *cur = (lv_obj_t *)lv_event_get_user_data(e);
 
-  if (d == LV_DIR_TOP && cur == scr_devices && auto_n) {
-    cur_screen = scr_autos;
-    lv_scr_load(scr_autos);
-    update_title();
-  } else if (d == LV_DIR_BOTTOM && cur == scr_autos) {
-    cur_screen = scr_devices;
-    lv_scr_load(scr_devices);
-    update_title();
+  if (cur == scr_devices) {
+    if (d == LV_DIR_LEFT && dev_page + 1 < dev_pages) {
+      goto_page(tv_devices, ++dev_page);
+    } else if (d == LV_DIR_RIGHT && dev_page > 0) {
+      goto_page(tv_devices, --dev_page);
+    } else if (d == LV_DIR_TOP && auto_n) {
+      cur_screen = scr_autos;
+      lv_scr_load(scr_autos);
+      update_title();
+    }
+  } else if (cur == scr_autos) {
+    if (d == LV_DIR_LEFT && auto_page + 1 < auto_pages) {
+      goto_page(tv_autos, ++auto_page);
+    } else if (d == LV_DIR_RIGHT && auto_page > 0) {
+      goto_page(tv_autos, --auto_page);
+    } else if (d == LV_DIR_BOTTOM) {
+      cur_screen = scr_devices;
+      lv_scr_load(scr_devices);
+      update_title();
+    }
   }
 }
 
@@ -177,18 +220,13 @@ static void refresh_entity(uint8_t i) {
 }
 
 static void update_title() {
+  // Page 0 of the devices screen is the overview; pages 1..n map to
+  // entities in order.
   const char *t = "Devices";
   if (cur_screen == scr_autos) {
     t = "Automations";
-  } else {
-    lv_obj_t *act = lv_tileview_get_tile_act(tv_devices);
-    // Tile 0 is the overview; tiles 1..n map to entities.
-    for (uint8_t i = 0; i < ent_n; i++) {
-      if (act == lv_obj_get_parent(ui[i].btn)) {
-        t = transport_entity(i)->name;
-        break;
-      }
-    }
+  } else if (dev_page > 0 && dev_page - 1 < ent_n) {
+    t = transport_entity(dev_page - 1)->name;
   }
   lv_label_set_text(title_label, t);
 }
@@ -320,6 +358,7 @@ static void create_entity_page(lv_obj_t *tile, uint8_t i) {
     lv_obj_set_pos(w, GAP + 6, 56);
     lv_obj_add_event_cb(w, wheel_cb, LV_EVENT_VALUE_CHANGED, (void *)(uintptr_t)i);
     lv_obj_add_event_cb(w, wheel_cb, LV_EVENT_RELEASED, (void *)(uintptr_t)i);
+    add_capture(w);
     ui[i].wheel = w;
 
     lv_obj_t *sw = lv_obj_create(tile);
@@ -351,6 +390,7 @@ static void create_entity_page(lv_obj_t *tile, uint8_t i) {
     lv_obj_set_ext_click_area(s, 14);
     lv_obj_add_event_cb(s, slider_cb, LV_EVENT_VALUE_CHANGED, (void *)(uintptr_t)i);
     lv_obj_add_event_cb(s, slider_cb, LV_EVENT_RELEASED, (void *)(uintptr_t)i);
+    add_capture(s);
     ui[i].slider = s;
   }
 }
@@ -358,10 +398,11 @@ static void create_entity_page(lv_obj_t *tile, uint8_t i) {
 static void create_automation_pages() {
   lv_coord_t w = (320 - 3 * GAP) / 2;
   lv_coord_t h = (BODY_H - 3 * GAP) / 2;
-  uint8_t pages = (auto_n + 3) / 4;
+  auto_pages = (auto_n + 3) / 4;
+  uint8_t pages = auto_pages;
 
   for (uint8_t p = 0; p < pages; p++) {
-    lv_obj_t *tile = lv_tileview_add_tile(tv_autos, p, 0, LV_DIR_HOR);
+    lv_obj_t *tile = lv_tileview_add_tile(tv_autos, p, 0, LV_DIR_NONE);
     lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
 
     for (uint8_t k = 0; k < 4; k++) {
@@ -405,8 +446,6 @@ static lv_obj_t *make_screen(lv_obj_t **tv_out) {
   lv_obj_clear_flag(tv, LV_OBJ_FLAG_SCROLL_ELASTIC);
   lv_obj_clear_flag(tv, LV_OBJ_FLAG_SCROLL_MOMENTUM);
 
-  lv_obj_add_event_cb(tv, tile_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
-
   *tv_out = tv;
   return scr;
 }
@@ -422,12 +461,12 @@ void dashboard_create() {
   scr_devices = make_screen(&tv_devices);
   scr_autos = make_screen(&tv_autos);
 
-  lv_obj_t *ov = lv_tileview_add_tile(tv_devices, 0, 0, LV_DIR_HOR);
+  lv_obj_t *ov = lv_tileview_add_tile(tv_devices, 0, 0, LV_DIR_NONE);
   lv_obj_clear_flag(ov, LV_OBJ_FLAG_SCROLLABLE);
   create_overview(ov);
 
   for (uint8_t i = 0; i < ent_n; i++) {
-    lv_obj_t *tile = lv_tileview_add_tile(tv_devices, i + 1, 0, LV_DIR_HOR);
+    lv_obj_t *tile = lv_tileview_add_tile(tv_devices, i + 1, 0, LV_DIR_NONE);
     lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
     create_entity_page(tile, i);
   }
@@ -436,6 +475,10 @@ void dashboard_create() {
 
   lv_obj_add_event_cb(scr_devices, gesture_cb, LV_EVENT_GESTURE, scr_devices);
   lv_obj_add_event_cb(scr_autos, gesture_cb, LV_EVENT_GESTURE, scr_autos);
+
+  dev_pages = 1 + ent_n;  // overview + one page per entity
+  dev_page = 0;
+  auto_page = 0;
 
   cur_screen = scr_devices;
   lv_scr_load(scr_devices);
