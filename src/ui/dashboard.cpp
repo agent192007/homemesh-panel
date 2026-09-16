@@ -51,6 +51,10 @@ static uint8_t auto_n;
 
 static lv_obj_t *scr_devices;
 static lv_obj_t *scr_autos;
+// Tracked rather than read back from lv_scr_act(): the title must
+// update from the screen we are switching *to*, not the one LVGL
+// still considers active.
+static lv_obj_t *cur_screen;
 static lv_obj_t *tv_devices;
 static lv_obj_t *tv_autos;
 
@@ -145,10 +149,12 @@ static void gesture_cb(lv_event_t *e) {
   lv_obj_t *cur = (lv_obj_t *)lv_event_get_user_data(e);
 
   if (d == LV_DIR_TOP && cur == scr_devices && auto_n) {
-    lv_scr_load_anim(scr_autos, LV_SCR_LOAD_ANIM_MOVE_TOP, 180, 0, false);
+    cur_screen = scr_autos;
+    lv_scr_load(scr_autos);
     update_title();
   } else if (d == LV_DIR_BOTTOM && cur == scr_autos) {
-    lv_scr_load_anim(scr_devices, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 180, 0, false);
+    cur_screen = scr_devices;
+    lv_scr_load(scr_devices);
     update_title();
   }
 }
@@ -172,7 +178,7 @@ static void refresh_entity(uint8_t i) {
 
 static void update_title() {
   const char *t = "Devices";
-  if (lv_scr_act() == scr_autos) {
+  if (cur_screen == scr_autos) {
     t = "Automations";
   } else {
     lv_obj_t *act = lv_tileview_get_tile_act(tv_devices);
@@ -422,11 +428,12 @@ void dashboard_create() {
   lv_obj_add_event_cb(scr_devices, gesture_cb, LV_EVENT_GESTURE, scr_devices);
   lv_obj_add_event_cb(scr_autos, gesture_cb, LV_EVENT_GESTURE, scr_autos);
 
+  cur_screen = scr_devices;
+  lv_scr_load(scr_devices);
+
   for (uint8_t i = 0; i < ent_n; i++) refresh_entity(i);
   refresh_status();
   update_title();
-
-  lv_scr_load(scr_devices);
 }
 
 // ------------------------------------------------------------
