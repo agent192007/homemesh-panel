@@ -226,24 +226,35 @@ static void refresh_status() {
 //  Construction
 // ------------------------------------------------------------
 static void create_header() {
+  // lv_layer_top() is created with lv_obj_create(NULL), i.e. it is a
+  // *screen* - LVGL forces it back to full display size on every
+  // layout pass. Sizing it here does nothing, and giving it an opaque
+  // background paints over the whole panel. It must stay transparent;
+  // the bar is a child of it.
   lv_obj_t *top = lv_layer_top();
-  lv_obj_set_style_bg_color(top, COL_BG, 0);
-  lv_obj_set_style_bg_opa(top, LV_OPA_COVER, 0);
-  lv_obj_set_size(top, 320, HEADER_H);
-  lv_obj_set_pos(top, 0, 0);
-  lv_obj_clear_flag(top, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_bg_opa(top, LV_OPA_TRANSP, 0);
+  lv_obj_clear_flag(top, LV_OBJ_FLAG_SCROLLABLE);
 
-  title_label = make_label(top, "Devices", &lv_font_montserrat_20, COL_TEXT);
+  lv_obj_t *bar = lv_obj_create(top);
+  lv_obj_remove_style_all(bar);
+  lv_obj_set_size(bar, 320, HEADER_H);
+  lv_obj_set_pos(bar, 0, 0);
+  lv_obj_set_style_bg_color(bar, COL_BG, 0);
+  lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+  lv_obj_clear_flag(bar, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+
+  title_label = make_label(bar, "Devices", &lv_font_montserrat_20, COL_TEXT);
   lv_obj_align(title_label, LV_ALIGN_LEFT_MID, GAP, 0);
 
-  status_dot = lv_obj_create(top);
+  status_dot = lv_obj_create(bar);
   lv_obj_set_size(status_dot, 10, 10);
   lv_obj_set_style_radius(status_dot, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_border_width(status_dot, 0, 0);
   lv_obj_clear_flag(status_dot, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_align(status_dot, LV_ALIGN_RIGHT_MID, -GAP, 0);
 
-  sensor_label = make_label(top, "", &lv_font_montserrat_14, COL_MUTED);
+  sensor_label = make_label(bar, "", &lv_font_montserrat_14, COL_MUTED);
   lv_obj_align_to(sensor_label, status_dot, LV_ALIGN_OUT_LEFT_MID, -6, 0);
 }
 
