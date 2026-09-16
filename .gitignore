@@ -8,3 +8,8 @@ mqtt_simulated_devices/.env
 mqtt_simulated_devices/.venv
 __pycache__/
 tools/.env
+
+# The HA config directory lives at C:\homeassistant, outside the repo, so
+# its runtime state (.storage holds the auth tokens, home-assistant_v2.db
+# is the recorder database) is never in scope here. ha/ holds only the
+# compose file that documents the instance.

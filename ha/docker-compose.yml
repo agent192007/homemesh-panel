@@ -1,0 +1,28 @@
+# Home Assistant for the HomeMesh panel demo.
+#
+# This file documents the instance that is already running, so it can be
+# rebuilt identically if Docker Desktop is ever reset. The config lives at
+# C:\homeassistant, NOT inside this repo - that is where the instance was
+# first created and moving it would only risk breaking a working setup.
+# Nothing here is gitignored because nothing here is state.
+#
+# Published ports, deliberately NOT network_mode: host. Docker Desktop on
+# the WSL2 backend does not give host networking a route onto the Windows
+# ICS adapter, so the panel could not reach HA that way. A published port
+# binds 0.0.0.0 in the VM and Docker Desktop forwards it on the Windows
+# side, which is what makes 192.168.137.1:8123 reachable from the ESP32.
+#
+#   docker compose -f ha/docker-compose.yml up -d
+services:
+  homeassistant:
+    container_name: homeassistant
+    image: ghcr.io/home-assistant/home-assistant:stable
+    volumes:
+      - C:\homeassistant:/config
+    environment:
+      - TZ=Asia/Kolkata
+    ports:
+      - "8123:8123"
+    # The hotspot comes up after Docker does on a cold boot; without this
+    # HA would be down on demo morning and look like a panel fault.
+    restart: unless-stopped
