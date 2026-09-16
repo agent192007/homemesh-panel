@@ -396,6 +396,15 @@ static lv_obj_t *make_screen(lv_obj_t **tv_out) {
   lv_obj_set_size(tv, 320, BODY_H);
   lv_obj_set_style_bg_color(tv, COL_BG, 0);
   lv_obj_set_style_border_width(tv, 0, 0);
+
+  // No paging animation. The tileview is the scroller, so these go on
+  // it, not on the tiles. anim_time 0 makes the snap-to-page instant;
+  // elastic is the rubber-band overshoot at the ends and momentum the
+  // fling glide - both read as animation once the snap is instant.
+  lv_obj_set_style_anim_time(tv, 0, 0);
+  lv_obj_clear_flag(tv, LV_OBJ_FLAG_SCROLL_ELASTIC);
+  lv_obj_clear_flag(tv, LV_OBJ_FLAG_SCROLL_MOMENTUM);
+
   lv_obj_add_event_cb(tv, tile_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
   *tv_out = tv;
