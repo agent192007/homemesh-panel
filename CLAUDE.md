@@ -123,9 +123,14 @@ The hotspot makes the demo independent of the venue.
   SSID. Looks exactly like broken firmware.
 - **WPA2, not WPA3.** WPA3-SAE on WROOM-32 with the Arduino core is
   unreliable.
-- **Windows Firewall inbound rule for TCP 8123 is required.** Without
-  it the panel joins WiFi fine and then times out on the WebSocket —
-  reads as a code bug, isn't one.
+- **Inbound firewall access to TCP 8123 is required — but a hand-made
+  port rule is not.** Docker Desktop installs its own inbound Allow rule
+  for `com.docker.backend.exe`, and because the published port is served
+  by that process, the rule already covers 8123. Verified 17 Sep: this
+  demo works with no port rule of its own. If neither path exists the
+  panel joins WiFi fine and then times out on the WebSocket — reads as a
+  code bug, isn't one. `tools/preflight.ps1` accepts either and says
+  which one is carrying it.
 - **Disable hotspot auto-shutoff.** Windows kills it after ~5 min with
   no clients connected.
 - Run HA in **Docker Desktop (WSL2 backend)**; published ports bind
@@ -153,21 +158,41 @@ alternative is a trap:
 `tools/ha_discover.py` therefore runs on the laptop against
 `http://localhost:8123`.
 
-### Current infrastructure state (16 Sep)
+### Current infrastructure state (17 Sep)
 
-- **No Home Assistant instance exists yet.** Standing HA up on the
-  laptop is step zero and is a bigger task than the WebSocket spike.
-- The dev desktop has no wireless interface (`netsh wlan show
-  interfaces` reports none), which is why it cannot be the demo machine
-  and why the split above resolves toward the laptop.
-- The existing MQTT broker is at `192.168.100.9` — a separate machine,
-  with no HA attached. Everything to date has been panel to broker to
-  Python simulator, with HA never in the loop.
-- HA host URL and long-lived access token: not yet obtained.
+Home Assistant exists and the panel drives it. Verified end to end on
+17 Sep: hotspot, auth, `subscribe_trigger`, `call_service`, flashed and
+working on the board.
+
+- **HA runs in Docker on the laptop.** Config lives at
+  `C:\homeassistant`, outside the repo — its `.storage` holds the auth
+  tokens and the recorder database. `ha/docker-compose.yml` *documents*
+  that running instance rather than creating a second one.
+- **The `demo` integration provides the entities**, plus one
+  `input_boolean` helper. No broker, no hardware, and being non-MQTT it
+  is what demonstrates the new architecture works.
+- **Areas are Living Room, Kitchen and Bedroom**, created by HA
+  onboarding. Entities are assigned at the entity level, which wins over
+  the device's in `ha_discover.py`'s resolution.
 - **`include/ha_layout.h` is committed, not gitignored.** It is
   generated, but it is also the only record of the demo layout, and a
   build that needs HA running to succeed is a bad thing to depend on at
   9am. It contains entity_ids and friendly names, no credentials.
+- HA URL and long-lived access token: **obtained**. The token lives in
+  `tools/.env` and `include/secrets.h`, both gitignored.
+- `WIFI_SSID` must be the **hotspot**, not the house network. It pointed
+  at the house network on 17 Sep, which is the real reason the panel
+  could not reach `192.168.137.1` — not the missing IP it looked like.
+- The dev desktop has no wireless interface (`netsh wlan show
+  interfaces` reports none), which is why it cannot be the demo machine
+  and why the split above resolves toward the laptop.
+- The MQTT broker at `192.168.100.9` is no longer in the loop.
+- Git identity was never configured on the laptop (only on the desktop).
+  It is now set repo-locally to `Pranesh S <king191621@gmail.com>`, the
+  identity the whole history uses.
+
+**Largest WebSocket frame observed: 1608 bytes** — the PC/ESP32 split
+doing its job, against the hundreds of KB a `get_states` would cost.
 
 ## Toolchain
 
@@ -253,9 +278,16 @@ Credentials live in `include/secrets.h` (gitignored).
 
 ## Scope
 
-Entities are currently hardcoded (3 lights + 1 switch + temp/humidity).
-Under the new architecture they become a runtime table driven by the
-layout, bounded at ~16 entries.
+The panel runs **9 entities across 3 room pages**, read from
+`include/ha_layout.h` — still a compile-time header, not yet the runtime
+table. Under the endgame they become a runtime table driven by the
+pushed layout, bounded at ~16 entries.
+
+On the panel today: 4 lights, 2 switches, 2 fans, 1 helper, plus
+temperature and humidity on the Living Room page. The four lights are
+the Home-page favourites.
+
+Rubric minimum, all met:
 
 - 3 lights (at least one with a brightness slider)
 - 1 switch
@@ -265,24 +297,111 @@ layout, bounded at ~16 entries.
 Prefer 4-6 entities with real bidirectional sync over many entities
 with one-way control.
 
+Two things about the `demo` integration worth not rediscovering:
+
+- **Every demo light reports `RGB`, never `Dimmable`.** That is fine —
+  `RGB` is on/off plus brightness plus colour, and the slider is gated
+  on `kind != Toggle`, so all four lights get one.
+- **There is only one temperature/humidity pair**, and both sensors are
+  in Living Room. Bedroom and Kitchen render blank sensor slots.
+  Deliberate: template sensors would mean inventing plausible room
+  temperatures, and blank beats invented.
+
 UI is **landscape** (320x240, `PANEL_ROTATION` in `main.cpp`).
 Touch mapping was verified correct in portrait with no swap/invert
 flags; rotation is handled in `touch_driver.cpp`.
 
 Cut list, in order, if behind schedule: drag-and-drop authoring (fall
 back to a checkbox picker and a fixed 2x2 grid), brightness sliders,
-second screen, animations. Nothing has been cut as of 16 Sep.
+second screen, animations. Nothing has been cut as of 17 Sep.
+
+## What is left
+
+Accurate as of 17 Sep, with the panel flashed and confirmed driving real
+HA. Ordered by what unblocks the most.
+
+### 1. Layout as data, not a header — the endgame gap
+
+The discovery half is done and proven; **the delivery half has not
+started.** Today, changing which entities appear means regenerate →
+rebuild → **reflash**, which is precisely what the Endgame section
+forbids. This is the difference between a working demo and the
+architecture this file describes.
+
+- Push layout JSON to the panel over the network. The panel already
+  holds an authenticated WebSocket; a second channel or a small HTTP
+  endpoint on the ESP32 both work.
+- Persist it in **NVS** so it survives reboot.
+- Build the LVGL widgets from the stored layout at boot rather than from
+  `HA_ENTITIES[]`. `ui/dashboard.cpp` already builds pages from a table,
+  so the shape is right — the table just has to come from NVS.
+- Watch `LV_MEM_SIZE`: a fixed 40 KB pool, and OOM presents as a hang or
+  a blank screen, not a clean error.
+
+Until this lands, `ha_layout.h` is the mechanism and reflashing is the
+update path. Say so plainly rather than implying otherwise.
+
+### 2. Desktop tool GUI
+
+`tools/ha_discover.py` works but is flags-only (`--list`, `--include`,
+`--favourite`). The endgame is an entity picker plus a drag-and-drop
+320x240 canvas emitting the same layout JSON. The output format does not
+change — only the authoring does.
+
+**First item on the cut list.** Falls back to a checkbox picker and a
+fixed 2x2 grid.
+
+### 3. Retire MQTT
+
+Now genuinely unblocked: the `demo` integration and the `input_boolean`
+helper replace the simulated entities, so nothing needs the broker.
+
+- Remove `src/mqtt_client.*`, `mqtt_simulated_devices/`, the
+  PubSubClient dependency, `MQTT_MAX_PACKET_SIZE`, `env:panel`, and the
+  `MQTT_*` defines in `secrets.h`.
+- Keep `v0.1-working-demo` as the historical fallback — deleting the
+  code removes a rollback path, so do this after the layout work is
+  stable, not before.
+
+Cleanup rather than new capability, but it shrinks what can break.
+
+### 4. Report and demo material
+
+Diagrams follow the convention at the bottom of this file. Current state
+of the report is not recorded here — fill this in rather than guessing
+at it.
+
+### Deliberate gaps, not TODOs
+
+- Bedroom and Kitchen have no sensor readouts. See Scope.
+- The Office and Entrance lights and three generic fans exist in HA but
+  have no area, so `ha_discover.py` drops them. They are spares held in
+  reserve, not omissions.
 
 ## Safety net
 
 - Git repo: `https://github.com/agent192007/homemesh-panel` (private).
-- Tag **`v0.1-working-demo`** is the last known-good static MQTT build.
-  Rollback is `git reset --hard v0.1-working-demo`.
+  Pushed and current as of 17 Sep.
+- Tag **`v0.2-ha-websocket-demo`** is the known-good WebSocket build —
+  the panel driving real HA. Rollback is
+  `git reset --hard v0.2-ha-websocket-demo`.
+- Tag **`v0.1-working-demo`** is the older static MQTT build.
 - Working binary saved **outside** the project at
-  `../homemesh_demo_firmware_12sep.bin` — `.pio` is gitignored, so the
+  `../homemesh_ha_firmware_17sep.bin` — `.pio` is gitignored, so the
   repo cannot rebuild it if the toolchain misbehaves. This is the real
   demo insurance.
-- Do the WebSocket work on `feat/ha-websocket`; `main` stays demoable.
+  - The `../homemesh_demo_firmware_12sep.bin` this file used to name was
+    **missing** when checked on 17 Sep, and nothing in the repo could
+    reconstruct it. If the MQTT fallback is wanted, rebuild `env:panel`
+    from `v0.1-working-demo`. Check the binary exists; do not assume.
+- **`tools/preflight.ps1`** checks the things that do not survive a
+  reboot — hotspot, firewall path, container, HA reachable on the
+  hotspot address, token valid, every layout entity still present. Run
+  it from cold before demoing. Exits with the number of failures.
+- The WebSocket work landed on `feat/ui-paged-navigation`, not
+  `feat/ha-websocket` as originally planned, and is merged. **`main` is
+  the demoable branch** — it has the paged UI, the discovery tool, the
+  WebSocket transport and the layout.
 
 ## Conventions
 
