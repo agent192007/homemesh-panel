@@ -59,7 +59,9 @@ LWT equivalent.
 Desktop tool: entity picker from `get_states` -> drag-and-drop 320x240
 canvas -> layout JSON -> pushed to the panel -> stored in NVS ->
 LVGL widgets built dynamically at boot. Firmware stays fixed; layout is
-data. **Do not plan a reflash step** — that would require esptool, a
+data. All of this is now written (`tools/layout_designer.py` and
+`src/layout_store.*`, 15 Oct) but not yet proven on hardware — see
+"What is left". **Do not plan a reflash step** — that would require esptool, a
 toolchain and CH340 drivers on the user's machine, and breaks the
 "runs on any PC" goal.
 
@@ -323,29 +325,52 @@ second screen, animations. Nothing has been cut as of 17 Sep.
 Accurate as of 17 Sep, with the panel flashed and confirmed driving real
 HA. Ordered by what unblocks the most.
 
-### 1. Layout as data, not a header — the endgame gap
+### 1. Layout as data, not a header — written 15 Oct, NOT yet flashed
 
-The discovery half is done and proven; **the delivery half has not
-started.** Today, changing which entities appear means regenerate →
-rebuild → **reflash**, which is precisely what the Endgame section
-forbids. This is the difference between a working demo and the
-architecture this file describes.
+The code exists and every environment builds. **It has never run on the
+board**, because HA and the panel were both down when it was written.
+Until someone flashes `env:ha` and pushes a layout, treat this as
+written-not-working, and say so rather than implying otherwise.
 
-- Push layout JSON to the panel over the network. The panel already
-  holds an authenticated WebSocket; a second channel or a small HTTP
-  endpoint on the ESP32 both work. **The format exists already** -
-  `include/ha_layout.json`, written by both authoring paths, 1002
-  bytes for the nine-entity demo layout. What is missing is the
-  receive side, not the payload.
-- Persist it in **NVS** so it survives reboot.
-- Build the LVGL widgets from the stored layout at boot rather than from
-  `HA_ENTITIES[]`. `ui/dashboard.cpp` already builds pages from a table,
-  so the shape is right — the table just has to come from NVS.
-- Watch `LV_MEM_SIZE`: a fixed 40 KB pool, and OOM presents as a hang or
-  a blank screen, not a clean error.
+How it works, so it is not re-derived:
 
-Until this lands, `ha_layout.h` is the mechanism and reflashing is the
-update path. Say so plainly rather than implying otherwise.
+- `src/layout_store.*` owns the entity table. `layout_boot()` reads a
+  layout from NVS and falls back to the compiled `ha_layout.h` if
+  there is nothing stored, nothing parseable, or nothing that
+  validates. **The header stays in the build deliberately** — a board
+  never pushed to still has to come up demoable, and a build whose UI
+  depends on NVS having been written is a bad thing to discover at 9am.
+- Delivery rides the WebSocket the panel already holds. The desktop
+  tool fires a custom **`homemesh_layout`** HA event; the panel is
+  subscribed to it. No HTTP server on the ESP32, and neither end ever
+  needs the panel's IP address — both only have to know where HA is.
+  `LAYOUT_EVENT` in `layout_store.h` and `ha_discover.py` must match.
+- Applying a layout **restarts the board**. Tearing down a screen's
+  worth of LVGL objects to build another is where the fixed 40 KB pool
+  fragments, and OOM there is a hang, not a clean error. A reboot is a
+  few seconds and is deterministic. This is a choice, not a shortcut.
+- Strings live in a fixed **2560-byte arena**, not the heap, so a
+  layout cannot grow into territory LVGL needs. The demo layout uses
+  403 bytes; a maxed-out layout would use 2320. Over that it is
+  rejected whole, with a reason.
+- Validation runs **before** anything is stored and never touches the
+  live table, so a rejected push leaves the panel running on the
+  layout it has. Every rejection names its cause on serial — a push
+  that silently does nothing is the worst version of this feature.
+
+The trap this had to work around, which is load-bearing: `handle_text`
+parses every frame through a filter into a **768-byte** document, and
+that is what keeps the hot path bounded. A 1002-byte layout does not
+fit it. So a layout push gets its own wider parse on its own path,
+paid only when a push arrives — **do not widen the shared filter to
+make the layout fit it.**
+
+`layout_store.cpp` is excluded from `env:panel` and `env:demo`: it
+needs ArduinoJson, which those paths do not carry.
+
+Still true until it is proven on hardware: `ha_layout.h` is the
+mechanism that is known to work, and reflashing is the update path
+that is known to work.
 
 ### 2. Desktop tool GUI — done 15 Oct
 
