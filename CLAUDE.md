@@ -155,8 +155,8 @@ alternative is a trap:
 - Flashing is serial, so the panel can be plugged into whichever
   machine is convenient regardless of which network it joins.
 
-`tools/ha_discover.py` therefore runs on the laptop against
-`http://localhost:8123`.
+`tools/ha_discover.py` and `tools/layout_designer.py` therefore run on
+the laptop against `http://localhost:8123`.
 
 ### Current infrastructure state (17 Sep)
 
@@ -198,6 +198,9 @@ doing its job, against the hundreds of KB a `get_states` would cost.
 
 - PlatformIO, `board = esp32dev` (no CYD-specific board definition exists)
 - Arduino framework
+- Desktop tools are Python 3 + stdlib `tkinter`. Only `websockets` is
+  a real dependency (`tools/requirements.txt`) - keep it that way, the
+  companion tool is supposed to run on a machine with no toolchain.
 - **LVGL pinned to 8.3.x.** 9.x changed the display and input driver
   API. Most CYD example code online is 8.3. Do not upgrade.
 - TFT_eSPI 2.5.x
@@ -330,7 +333,10 @@ architecture this file describes.
 
 - Push layout JSON to the panel over the network. The panel already
   holds an authenticated WebSocket; a second channel or a small HTTP
-  endpoint on the ESP32 both work.
+  endpoint on the ESP32 both work. **The format exists already** -
+  `include/ha_layout.json`, written by both authoring paths, 1002
+  bytes for the nine-entity demo layout. What is missing is the
+  receive side, not the payload.
 - Persist it in **NVS** so it survives reboot.
 - Build the LVGL widgets from the stored layout at boot rather than from
   `HA_ENTITIES[]`. `ui/dashboard.cpp` already builds pages from a table,
@@ -341,15 +347,32 @@ architecture this file describes.
 Until this lands, `ha_layout.h` is the mechanism and reflashing is the
 update path. Say so plainly rather than implying otherwise.
 
-### 2. Desktop tool GUI
+### 2. Desktop tool GUI — done 15 Oct
 
-`tools/ha_discover.py` works but is flags-only (`--list`, `--include`,
-`--favourite`). The endgame is an entity picker plus a drag-and-drop
-320x240 canvas emitting the same layout JSON. The output format does not
-change — only the authoring does.
+`tools/layout_designer.py`. Entity picker grouped by area, Home-page
+favourites, a 320x240 preview at 2x, drag to reorder, writes both
+outputs. stdlib tkinter only — a pip install of a GUI framework would
+undercut the "runs on any PC" goal. Discovery still needs `websockets`,
+same as the CLI.
 
-**First item on the cut list.** Falls back to a checkbox picker and a
-fixed 2x2 grid.
+`ha_discover.py` is now a shared module (`fetch_inventory`,
+`select_layout`, `build_header`, `build_layout`) with the CLI as one
+caller and the app as the other, so the layout format is defined once.
+If you change it, change it there. Regression test: the app's write
+path must reproduce the committed `ha_layout.h` byte for byte.
+
+Two deliberate limits, both forced by the firmware rather than by time:
+
+- **Drag edits order, not position.** `grid_for()` in
+  `ui/dashboard.cpp` derives a tile's position from its index within
+  its page, so order is the whole of what the panel can honour. A
+  free-form canvas would author layouts the panel silently ignores.
+- **Home page order is derived, not editable.** `build_pages()` walks
+  the entity list once, pushing each favourite onto page 0 and each
+  entity onto its room page, so the two orders are one traversal.
+  Reordering a room reorders Home.
+
+Was first on the cut list; nothing was cut to get it.
 
 ### 3. Retire MQTT
 
