@@ -239,11 +239,19 @@ static void send_subscribe_events() {
 // The one message too big for the filtered hot path, so it gets its
 // own parse. That cost is paid only when a push actually arrives;
 // every state event still goes through the small bounded document.
+// At file scope, NOT on the stack. The net task gets 8KB and the
+// WebSockets call chain is already ~20 frames deep by the time a
+// frame reaches handle_text; a 4KB document on top of that overflows
+// and trips the stack canary. GCC also inlines handle_layout_push
+// into handle_text, so the cost would be paid on *every* frame, not
+// just a push. Only the net task touches this.
+static StaticJsonDocument<4096> layout_doc;
+
 static void handle_layout_push(uint8_t *payload, size_t len) {
   StaticJsonDocument<128> filter;
   filter["event"]["data"]["layout"] = true;
 
-  StaticJsonDocument<4096> doc;
+  StaticJsonDocument<4096> &doc = layout_doc;
   DeserializationError jerr = deserializeJson(doc, payload, len,
                                               DeserializationOption::Filter(filter));
   if (jerr) {
@@ -325,6 +333,10 @@ static void handle_text(uint8_t *payload, size_t len) {
     authed = true;
     send_subscribe();
     send_subscribe_events();
+    // Report the margin rather than waiting to discover it as a boot
+    // loop. This is the deepest the task gets in normal operation.
+    Serial.printf("[ha] net task stack free: %u bytes\n",
+                  (unsigned)uxTaskGetStackHighWaterMark(nullptr));
     post(EventType::Link, 0, (int32_t)LinkState::Online);
     post(EventType::DevicesAvailable, 0, 1);
     fetch_initial_states();
@@ -553,7 +565,13 @@ void transport_start() {
   // Priority 0 (same as IDLE0), not 1. The WebSocket and HTTP clients
   // both spin waiting on sockets; at priority 1 they starve IDLE0 and
   // trip the task watchdog. Same trap as mqtt_client.cpp.
-  xTaskCreatePinnedToCore(net_task, "net", 8192, nullptr, 0, nullptr, 0);
+  // 12KB, not 8KB. The layout push path adds call depth on top of a
+  // WebSockets chain that is already ~20 frames deep, and this task
+  // overflowing presents as a boot loop with a stack canary panic,
+  // not as anything that points at the cause. The big JSON documents
+  // are at file scope for the same reason - that is the actual fix,
+  // this is the margin. Costs 4KB of a 320KB budget.
+  xTaskCreatePinnedToCore(net_task, "net", 12288, nullptr, 0, nullptr, 0);
 }
 
 bool transport_next_event(PanelEvent *e) {

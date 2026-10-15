@@ -27,6 +27,12 @@ static const char *NVS_KEY = "layout";
 // ~600 bytes, so this has roughly 4x headroom.
 static const size_t ARENA_N = 2560;
 
+// Shared by layout_boot() and layout_store_json(), which never run at
+// the same time - one is boot, the other is a push arriving later. At
+// file scope rather than on the stack: 4KB would overflow both the
+// setup task and the net task, which each get 8KB.
+static StaticJsonDocument<4096> parse_doc;
+
 static char arena[ARENA_N];
 static size_t arena_used;
 
@@ -256,7 +262,7 @@ void layout_boot() {
   }
 
   // Zero-copy: the document points into nvs_buf, which is static.
-  StaticJsonDocument<4096> doc;
+  StaticJsonDocument<4096> &doc = parse_doc;
   DeserializationError jerr = deserializeJson(doc, nvs_buf);
   if (jerr) {
     Serial.printf("[layout] stored layout will not parse (%s), using the compiled one\n",
@@ -295,7 +301,7 @@ bool layout_store_json(const char *json, size_t len, char *err, size_t err_n) {
     return false;
   }
 
-  StaticJsonDocument<4096> doc;
+  StaticJsonDocument<4096> &doc = parse_doc;
   DeserializationError jerr = deserializeJson(doc, json, len);
   if (jerr) {
     snprintf(err, err_n, "will not parse: %s", jerr.c_str());
