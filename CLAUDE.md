@@ -242,6 +242,16 @@ it** — `ha_client.*` presents the same three-function interface as
   the LVGL loop through a queue.
 - **Network task priority must be 0, not 1.** At 1 it starves IDLE0 and
   trips the task watchdog. See the comment in `mqtt_client.cpp`.
+- **Nothing large goes on the net task's stack.** It has 12 KB and the
+  WebSockets call chain is already ~20 frames deep when a frame
+  reaches `handle_text`. A 4 KB `StaticJsonDocument` local there cost
+  a day: GCC inlined the function into `handle_text`, so the 4 KB was
+  reserved on *every* frame, and it panicked inside an unrelated
+  `Serial.printf` during startup with no layout in sight. Big
+  documents live at file scope — see `layout_doc` in `ha_client.cpp`
+  and `parse_doc` in `layout_store.cpp`. The panel logs its stack
+  high-water mark after auth; watch that number rather than waiting
+  for the canary.
 - **Touch coordinates need rotating** to match `tft.setRotation()`.
   Taps landing mirrored or on the wrong axis is a rotation mismatch,
   not a broken touch driver.
@@ -430,11 +440,16 @@ at it.
 
 - Git repo: `https://github.com/agent192007/homemesh-panel` (private).
   Pushed and current as of 17 Sep.
-- Tag **`v0.2-ha-websocket-demo`** is the known-good WebSocket build —
-  the panel driving real HA. Rollback is
-  `git reset --hard v0.2-ha-websocket-demo`.
+- Tag **`v0.3-runtime-layout`** is current: the panel reads its entity
+  table from NVS, falling back to the compiled `ha_layout.h`. Boots
+  clean on the board, 15 Oct. Rollback is
+  `git reset --hard v0.3-runtime-layout`.
+- Tag **`v0.2-ha-websocket-demo`** is the last build with the entity
+  table compiled in. Use it if the runtime layout path misbehaves —
+  it is the same demo, minus the push.
 - Tag **`v0.1-working-demo`** is the older static MQTT build.
-- Working binary saved **outside** the project at
+- Working binaries saved **outside** the project at
+  `../homemesh_ha_firmware_15oct.bin` (current) and
   `../homemesh_ha_firmware_17sep.bin` — `.pio` is gitignored, so the
   repo cannot rebuild it if the toolchain misbehaves. This is the real
   demo insurance.
