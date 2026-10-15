@@ -20,16 +20,12 @@ struct HaEntityCfg {
   bool favourite;
 };
 
-#define HA_ENTITY_COUNT 9
+#define HA_ENTITY_COUNT 5
 static const HaEntityCfg HA_ENTITIES[] = {
   { "switch.ac", "AC", EntityKind::Toggle, 0, false },
   { "light.bed_light", "Bed Light", EntityKind::RGB, 0, true },
-  { "fan.ceiling_fan", "Ceiling Fan", EntityKind::Toggle, 0, false },
-  { "light.kitchen_lights", "Kitchen Lights", EntityKind::RGB, 1, true },
-  { "input_boolean.panel_demo_switch", "Panel Demo Switch", EntityKind::Toggle, 1, false },
+  { "light.kitchen_lights", "Kitchen Lights", EntityKind::RGB, 1, false },
   { "light.ceiling_lights", "Ceiling Lights", EntityKind::RGB, 2, true },
-  { "switch.decorative_lights", "Decorative Lights", EntityKind::Toggle, 2, false },
-  { "fan.living_room_fan", "Living Room Fan", EntityKind::Toggle, 2, false },
   { "light.living_room_rgbww_lights", "Living Room RGBWW Lights", EntityKind::RGB, 2, true },
 };
 
