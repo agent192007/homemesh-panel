@@ -4,9 +4,34 @@ Wall-mounted smart home control panel. ESP32 + 3.2" touchscreen,
 talking to Home Assistant. Local-first, no cloud.
 
 Academic project, VIT Chennai. Carries 70% of the grade.
-**18 September is a checkpoint: ~70% complete, not a final submission.**
-Final deadline is ~3 weeks out (early October, not yet fixed).
-Prioritise an impressive working demo over elegance.
+
+**The 70% review is done and went well.** What remains is the final
+review and submission, **20 October**. Prioritise an impressive working
+demo over elegance — and at this point, prioritise the report over new
+capability, because the engineering is essentially where this file says
+it should be and the report is not.
+
+## Pick up here (end of 16 Oct)
+
+Four days left. In order:
+
+1. **Prove a layout push on the board.** This is the only part of the
+   architecture never confirmed on hardware. HA's side is verified;
+   the panel went offline before the fix could be flashed. Flash
+   `env:ha`, push from the designer, and look for
+   `[layout] push received` then `[layout] loaded from NVS`.
+2. **Run the microSD triage** (`pio run -e sdscan -t upload -t monitor`).
+   Five minutes, never run. It decides whether the 128GB card is a
+   feature or just hardware that happens to be fitted — and the
+   diagrams should not be redrawn until that is known.
+3. **Update the report material.** `docs/` describes a version of this
+   project that no longer exists. See "What is left" item 4.
+
+Not blocking, and arguably not worth starting: retiring MQTT.
+
+The last session ended with the board physically disconnected —
+`getportnames` returned nothing. Replug before assuming anything is
+broken.
 
 ## Where the project is going
 
@@ -79,6 +104,30 @@ identified empirically:
 | Touch           | **GT911**    | I2C, capacitive. Well supported.         |
 | USB-serial      | CH340        |                                          |
 | Panel           | 240x320 IPS  | Portrait native.                         |
+| microSD         | **present, not characterised** | 128GB card fitted 7 Oct. See below. |
+
+A **128GB microSD card** was added to the board on 7 Oct and nothing
+uses it yet. Two things must be established before any feature is
+designed onto it, and neither should be assumed:
+
+- **Which SPI bus the slot is on.** The TFT is on HSPI
+  (SCLK=14 MOSI=13 MISO=12 CS=15). If the slot shares those pins every
+  card access has to be fenced against TFT_eSPI's transactions, which
+  changes what the card is worth. Community wiring for this board puts
+  it on VSPI (18/23/19/5), making the two independent.
+- **Whether the card mounts at all.** 128GB is SDXC and ships
+  formatted **exFAT**; the Arduino SD library reads FAT16/FAT32 only,
+  so a perfectly good card reads as dead hardware. Reformat FAT32 —
+  Windows will not do it above 32GB, so use the SD Association
+  formatter or guiformat.
+
+`env:sdscan` (`src/sd_card_scan.cpp`) answers both and then repeats the
+test with the display live, because mounting on an idle bus proves
+nothing about the running panel. **It has not been run yet.**
+
+A 128GB card is wildly oversized for a layout, and layouts go to NVS
+anyway — so the card's plausible use is logging or assets, not the
+layout path. Decide that *after* the triage, not before.
 
 CGRAM offsets are **not** needed — borders render flush to all four
 edges with default settings. Don't add offset defines.
@@ -160,11 +209,12 @@ alternative is a trap:
 `tools/ha_discover.py` and `tools/layout_designer.py` therefore run on
 the laptop against `http://localhost:8123`.
 
-### Current infrastructure state (17 Sep)
+### Current infrastructure state (16 Oct)
 
 Home Assistant exists and the panel drives it. Verified end to end on
 17 Sep: hotspot, auth, `subscribe_trigger`, `call_service`, flashed and
-working on the board.
+working on the board. Still true on 16 Oct, now with the entity table
+**and the colours** loaded at runtime instead of compiled in.
 
 - **HA runs in Docker on the laptop.** Config lives at
   `C:\homeassistant`, outside the repo — its `.storage` holds the auth
@@ -193,8 +243,20 @@ working on the board.
   It is now set repo-locally to `Pranesh S <king191621@gmail.com>`, the
   identity the whole history uses.
 
+Added since, on 15-16 Oct:
+
+- **`tools/layout_designer.py`** — the desktop authoring application.
+- **Layout and theme load from NVS at boot**, falling back to the
+  compiled `ha_layout.h` and `panel_theme.cpp`. See "What is left".
+- **The push itself is not yet confirmed on hardware.** HA's half is
+  verified; the panel's half has never completed a push end to end.
+  Do not describe it as working until it has.
+- The layout on the board is whatever was last pushed. `env:ha` logs
+  which source it booted from — read that rather than assuming.
+
 **Largest WebSocket frame observed: 1608 bytes** — the PC/ESP32 split
 doing its job, against the hundreds of KB a `get_states` would cost.
+A layout push frame is ~890 bytes, comfortably inside the same budget.
 
 ## Toolchain
 
@@ -329,19 +391,28 @@ flags; rotation is handled in `touch_driver.cpp`.
 
 Cut list, in order, if behind schedule: drag-and-drop authoring (fall
 back to a checkbox picker and a fixed 2x2 grid), brightness sliders,
-second screen, animations. Nothing has been cut as of 17 Sep.
+second screen, animations. **Nothing has been cut as of 16 Oct** — the
+first item on that list shipped instead. If something has to give in
+the last four days, give up the microSD work and retiring MQTT, not
+anything on this list.
 
 ## What is left
 
-Accurate as of 17 Sep, with the panel flashed and confirmed driving real
-HA. Ordered by what unblocks the most.
+Accurate as of 16 Oct. Ordered by what unblocks the most.
 
-### 1. Layout as data, not a header — written 15 Oct, NOT yet flashed
+### 1. Layout as data, not a header — flashed, push unconfirmed
 
-The code exists and every environment builds. **It has never run on the
-board**, because HA and the panel were both down when it was written.
-Until someone flashes `env:ha` and pushes a layout, treat this as
-written-not-working, and say so rather than implying otherwise.
+Every environment builds, and the board **boots on it** (16 Oct): it
+reads NVS, finds nothing stored, falls back to the compiled
+`ha_layout.h`, and runs. That fallback path is confirmed.
+
+**What is not confirmed is a push completing.** No layout has ever
+reached the board end to end. HA's half is verified — `subscribe_events`
+succeeds, `fire_event` returns success, the event reaches a subscriber
+as an ~890-byte frame — but the panel went offline before the fix for
+the silent-drop bug below could be flashed. Until someone sees
+`[layout] push received` followed by `[layout] loaded from NVS`, say
+so plainly rather than implying it works.
 
 How it works, so it is not re-derived:
 
@@ -456,11 +527,38 @@ helper replace the simulated entities, so nothing needs the broker.
 
 Cleanup rather than new capability, but it shrinks what can break.
 
-### 4. Report and demo material
+### 4. Report and demo material — the real gap now
 
-Diagrams follow the convention at the bottom of this file. Current state
-of the report is not recorded here — fill this in rather than guessing
-at it.
+**This is the thing being graded on the 20th, and it is the least
+current part of the project.** `docs/` was written on 17 Sep and
+describes a version of this project that no longer exists.
+
+What exists today:
+
+- `docs/PROJECT_BRIEF.md` — the pre-presentation briefing.
+- `docs/HomeMesh_Panel_Project_Documentation.docx` — the handover
+  document written for a teammate building slides. Structurally
+  validated but **never visually opened** — LibreOffice and pandoc are
+  both absent from this machine. Open it once before relying on it.
+- `docs/figures/arch_overall.png`, `arch_hardware.png`,
+  `arch_software.png`, generated by `generate_diagrams.py`, in the
+  plain-rectangle convention at the bottom of this file.
+
+What is stale in all of them:
+
+- No mention of **`tools/layout_designer.py`**; they describe discovery
+  as flags-only.
+- No mention of the **runtime layout path** — they describe the entity
+  table as a compiled header, which was the thing the project was
+  criticised for being.
+- No mention of **theming**.
+- No mention of the **microSD card**, which is physically on the board.
+- The title page still has blanks: team members, register numbers,
+  faculty guide, submission date.
+
+The three diagrams are regenerated by editing
+`docs/figures/generate_diagrams.py` and rerunning it — do not hand-edit
+the PNGs. It needs Pillow.
 
 ### Deliberate gaps, not TODOs
 
@@ -472,7 +570,9 @@ at it.
 ## Safety net
 
 - Git repo: `https://github.com/agent192007/homemesh-panel` (private).
-  Pushed and current as of 17 Sep.
+  **12 commits ahead of `origin/main` as of the end of 16 Oct — the
+  runtime layout, theming and the desktop app are local only.** Push
+  before relying on the remote as a backup.
 - Tag **`v0.3-runtime-layout`** is current: the panel reads its entity
   table from NVS, falling back to the compiled `ha_layout.h`. Boots
   clean on the board, 15 Oct. Rollback is
