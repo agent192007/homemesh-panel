@@ -293,14 +293,15 @@ Credentials live in `include/secrets.h` (gitignored).
 
 ## Scope
 
-The panel runs **9 entities across 3 room pages**, read from
-`include/ha_layout.h` — still a compile-time header, not yet the runtime
-table. Under the endgame they become a runtime table driven by the
-pushed layout, bounded at ~16 entries.
+The entity list is **authored, not fixed** — pick it in
+`tools/layout_designer.py` and push it. `include/ha_layout.json` is
+whatever was last written; `include/ha_layout.h` is the same selection
+as the compiled fallback. Bounded at `MAX_ENTITIES` (12), six areas,
+six tiles per page.
 
-On the panel today: 4 lights, 2 switches, 2 fans, 1 helper, plus
-temperature and humidity on the Living Room page. The four lights are
-the Home-page favourites.
+**Do not quote an entity count as a fact about the project** — it
+changes whenever someone opens the designer. What has to stay true is
+the rubric minimum below.
 
 Rubric minimum, all met:
 
@@ -355,6 +356,18 @@ How it works, so it is not re-derived:
   subscribed to it. No HTTP server on the ESP32, and neither end ever
   needs the panel's IP address — both only have to know where HA is.
   `LAYOUT_EVENT` in `layout_store.h` and `ha_discover.py` must match.
+  Verified 16 Oct on the HA side: `subscribe_events` succeeds,
+  `fire_event` returns success, and the event reaches a subscriber as
+  an ~890-byte frame.
+- **A push is recognised from the raw frame, before parsing.** It used
+  to be decided from the filtered document, and that failed silently:
+  the hot-path filter is a fixed-size document, and ArduinoJson drops
+  keys that do not fit **without an error**. Adding one key to an
+  already-full 256-byte filter made every push vanish with nothing on
+  the console. Do not move this check back into the parsed document.
+- There is **no acknowledgement** back to the desktop tool. "Pushed N
+  bytes" means HA accepted the event, not that the panel took it. The
+  serial log is the only confirmation.
 - Applying a layout **restarts the board**. Tearing down a screen's
   worth of LVGL objects to build another is where the fixed 40 KB pool
   fragments, and OOM there is a hang, not a clean error. A reboot is a
@@ -381,6 +394,26 @@ needs ArduinoJson, which those paths do not carry.
 Still true until it is proven on hardware: `ha_layout.h` is the
 mechanism that is known to work, and reflashing is the update path
 that is known to work.
+
+### 1b. Colours as data — done 16 Oct
+
+Styling was nine `#define`s in `ui/dashboard.cpp`. A pushed layout can
+now carry an optional `theme` object and the designer has swatches for
+all nine. Worth knowing:
+
+- All 34 colour uses go through those nine macros, so they kept their
+  names and now read `g_theme`. The rest of `dashboard.cpp` was
+  untouched — keep it that way.
+- `g_theme` lives in **`src/panel_theme.cpp`**, not the layout store,
+  because `ui/dashboard.cpp` needs it in every environment and the
+  store is only built into `env:ha`. `env:demo` and `env:panel` keep
+  the compiled colours, which is correct — they cannot receive a theme.
+- A missing colour means *keep the default*, so a partial theme is
+  valid and no colour is ever undefined. `theme_defaults()` in
+  `panel_theme.cpp` and `THEME_DEFAULTS` in `ha_discover.py` must
+  agree.
+- The tool sends only colours that differ, so an unstyled layout has
+  no `theme` key at all.
 
 ### 2. Desktop tool GUI — done 15 Oct
 
