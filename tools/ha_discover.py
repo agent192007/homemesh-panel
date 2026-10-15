@@ -66,6 +66,15 @@ MAX_PER_PAGE = 6
 # rather than guess at fields.
 LAYOUT_VERSION = 1
 
+# The custom HA event a pushed layout travels on. Must match
+# LAYOUT_EVENT in src/layout_store.h.
+#
+# The panel subscribes to this on the WebSocket it already holds, so
+# pushing a layout needs no HTTP server on the ESP32 and - the part
+# that actually matters on a hotspot - no way of discovering the
+# panel's IP address. Both ends only have to know where HA is.
+LAYOUT_EVENT = "homemesh_layout"
+
 
 def load_env():
     env = {}
@@ -373,6 +382,31 @@ def dump_layout(layout):
     return json.dumps(layout, separators=(",", ":"), ensure_ascii=False)
 
 
+async def push_layout(url, token, layout):
+    """Send a layout to the panel, via Home Assistant.
+
+    Fires LAYOUT_EVENT with the layout as event data. Any panel
+    subscribed to that event stores it in NVS and restarts into it,
+    which is what replaces the regenerate/rebuild/reflash cycle.
+
+    Returns the payload size in bytes. Note that this reaches *every*
+    panel listening, which is the right behaviour for one wall panel
+    and worth knowing before there are two.
+    """
+    payload = dump_layout(layout)
+    if len(payload) > 3072:
+        raise ValueError(f"layout is {len(payload)} bytes; the panel accepts 3072")
+
+    ws = await connect(url, token)
+    ha = HA(ws)
+    try:
+        await ha.cmd("fire_event", event_type=LAYOUT_EVENT,
+                     event_data={"layout": layout})
+    finally:
+        await ws.close()
+    return len(payload)
+
+
 def write_outputs(area_names, rows, acts, sensor_rows, log=print):
     HEADER_OUT.write_text(build_header(area_names, rows, acts, sensor_rows),
                           encoding="utf-8")
@@ -421,6 +455,18 @@ async def run(args):
     print()
     write_outputs(*tables)
 
+    if args.push:
+        area_names, rows, acts, sensor_rows = tables
+        layout = build_layout(area_names, rows, acts, sensor_rows)
+        try:
+            n = await push_layout(url, token, layout)
+        except Exception as e:
+            sys.exit(f"push failed: {type(e).__name__}: {e}")
+        print()
+        print(f"Pushed {n} bytes to the panel.")
+        print("It stores the layout in NVS and restarts into it; give it "
+              "a few seconds.")
+
 
 def main():
     ap = argparse.ArgumentParser(description="Generate the panel layout from Home Assistant.")
@@ -430,6 +476,8 @@ def main():
     ap.add_argument("--include", help="comma-separated entity_ids to put on the panel")
     ap.add_argument("--favourite", default="", help="comma-separated entity_ids for the Home page")
     ap.add_argument("--automations", help="comma-separated scene/script/automation entity_ids")
+    ap.add_argument("--push", action="store_true",
+                    help="also send the layout to the panel over HA (no reflash)")
     asyncio.run(run(ap.parse_args()))
 
 

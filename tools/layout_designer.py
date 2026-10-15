@@ -209,14 +209,12 @@ class Designer(tk.Tk):
                                  state="disabled", command=self.on_generate)
         self.gen_btn.pack(side="left")
 
-        # Visible and disabled on purpose: the firmware receive path is
-        # the remaining half of the endgame, and a greyed button states
-        # that more honestly than leaving the flow undrawn.
-        self.push_btn = tk.Button(bottom, text="Push to panel", width=16, state="disabled")
+        self.push_btn = tk.Button(bottom, text="Push to panel", width=16,
+                                  state="disabled", command=self.on_push)
         self.push_btn.pack(side="left", padx=8)
         tk.Label(bottom, bg=UI_BG, fg="#999",
-                 text="needs the firmware receive path - layout still ships via "
-                      "ha_layout.h and a reflash").pack(side="left")
+                 text="sends the layout through Home Assistant - the panel stores "
+                      "it and restarts into it, no reflash").pack(side="left")
 
     def _on_wheel(self, event):
         self.pick_canvas.yview_scroll(int(-event.delta / 120), "units")
@@ -266,8 +264,18 @@ class Designer(tk.Tk):
                              f"{len(payload.sensors)} sensors", fg="#2A7")
                     self.connect_btn.config(state="normal", text="Reconnect")
                     self.gen_btn.config(state="normal")
+                    self.push_btn.config(state="normal")
                     self._populate_picker()
                     self._recompute()
+                elif kind == "pushed":
+                    self.push_btn.config(state="normal", text="Push to panel")
+                    self.log(f"pushed {payload} bytes to the panel")
+                    self.log("it stores the layout in NVS and restarts into it; "
+                             "give it a few seconds")
+                elif kind == "push_failed":
+                    self.push_btn.config(state="normal", text="Push to panel")
+                    self.log(f"PUSH FAILED {payload}")
+                    messagebox.showerror("Push failed", payload)
                 elif kind == "error":
                     self.status.config(text="connection failed", fg="#C33")
                     self.connect_btn.config(state="normal")
@@ -581,6 +589,31 @@ class Designer(tk.Tk):
             self.include[e["id"]] = tk.BooleanVar(value=True)
             self.favourite[e["id"]] = tk.BooleanVar(value=bool(e.get("fav")))
         self.log(f"loaded {len(ents)} entities from {f.name}")
+
+    def on_push(self):
+        """Send the layout to the panel through Home Assistant.
+
+        Nothing here addresses the panel. The firmware subscribes to
+        LAYOUT_EVENT on the WebSocket it already holds, so a push only
+        has to reach HA - which is the one address both ends already
+        agree on.
+        """
+        if not self.tables or not self.tables[1]:
+            messagebox.showwarning("Nothing to push",
+                                   "Tick at least one entity first.")
+            return
+        layout = hd.build_layout(*self.tables)
+        self.push_btn.config(state="disabled", text="Pushing...")
+        threading.Thread(target=self._push, args=(layout,), daemon=True).start()
+
+    def _push(self, layout):
+        import asyncio
+        try:
+            n = asyncio.run(hd.push_layout(self.url_var.get().strip(),
+                                           self.token_var.get().strip(), layout))
+            self.msgq.put(("pushed", n))
+        except Exception as e:
+            self.msgq.put(("push_failed", f"{type(e).__name__}: {e}"))
 
     def on_generate(self):
         if not self.tables:

@@ -5,6 +5,7 @@
 #include <ArduinoJson.h>
 
 #include "transport.h"
+#include "layout_store.h"
 #include "secrets.h"
 
 // ------------------------------------------------------------
@@ -25,30 +26,17 @@
 //  Build with env:ha.
 // ------------------------------------------------------------
 
-#if !__has_include("ha_layout.h")
-#error "include/ha_layout.h is missing. Generate it first: python tools/ha_discover.py --list, then --include <entity_ids>"
-#endif
-#include "ha_layout.h"
-
-// Older generated headers predate sensor discovery. Treat that as
-// "no sensors" rather than failing the build - the UI renders the
-// header sensor rows blank when nothing reports.
-#ifndef HA_SENSOR_COUNT
-#define HA_SENSOR_COUNT 0
-struct HaSensorCfg { const char *id; uint8_t area; bool humidity; };
-static const HaSensorCfg HA_SENSORS[1] = { { "", 0, false } };
-#endif
-
-static_assert(HA_ENTITY_COUNT <= MAX_ENTITIES, "ha_layout.h has more entities than MAX_ENTITIES");
-static_assert(HA_AREA_COUNT <= MAX_AREAS, "ha_layout.h has more areas than MAX_AREAS");
-static_assert(HA_ACTION_COUNT <= MAX_AUTOMATIONS, "ha_layout.h has more actions than MAX_AUTOMATIONS");
+// The entity table is no longer compiled in here. layout_store.cpp
+// owns both sources - NVS and the ha_layout.h fallback - and this
+// file reads whichever one won through g_layout.
 
 static const uint32_t RETRY_MS = 5000;
 
 // HA requires message ids to be strictly increasing per connection;
-// 1 is always the trigger subscription.
+// 1 is always the trigger subscription, 2 the layout event one.
 static const uint16_t ID_SUBSCRIBE = 1;
-static uint16_t next_id = 2;
+static const uint16_t ID_SUBSCRIBE_EVENTS = 2;
+static uint16_t next_id = 3;
 
 struct Command {
   EventType type;
@@ -75,14 +63,14 @@ static void post(EventType type, uint8_t entity, int32_t value, float fvalue = 0
 // ------------------------------------------------------------
 
 static int entity_index(const char *entity_id) {
-  for (uint8_t i = 0; i < HA_ENTITY_COUNT; i++)
-    if (strcmp(HA_ENTITIES[i].id, entity_id) == 0) return i;
+  for (uint8_t i = 0; i < g_layout.ent_n; i++)
+    if (strcmp(g_layout.ents[i].id, entity_id) == 0) return i;
   return -1;
 }
 
 static int sensor_index(const char *entity_id) {
-  for (uint8_t i = 0; i < HA_SENSOR_COUNT; i++)
-    if (strcmp(HA_SENSORS[i].id, entity_id) == 0) return i;
+  for (uint8_t i = 0; i < g_layout.sens_n; i++)
+    if (strcmp(g_layout.sens[i].id, entity_id) == 0) return i;
   return -1;
 }
 
@@ -110,13 +98,13 @@ static void apply_entity_state(uint8_t i, const char *state, JsonVariantConst at
   // device. Both fall through to off rather than being guessed at.
   post(EventType::Power, i, strcmp(state, "on") == 0);
 
-  if (HA_ENTITIES[i].kind == EntityKind::Toggle) return;
+  if (g_layout.ents[i].kind == EntityKind::Toggle) return;
   if (attrs.isNull()) return;
 
   JsonVariantConst b = attrs["brightness"];
   if (!b.isNull()) post(EventType::Brightness, i, constrain(b.as<int>(), 0, 255));
 
-  if (HA_ENTITIES[i].kind == EntityKind::RGB) {
+  if (g_layout.ents[i].kind == EntityKind::RGB) {
     JsonArrayConst rgb = attrs["rgb_color"];
     if (!rgb.isNull() && rgb.size() >= 3) {
       post(EventType::Color, i,
@@ -132,8 +120,8 @@ static void apply_sensor_state(uint8_t i, const char *state) {
   char *end = nullptr;
   float v = strtof(state, &end);
   if (end == state) return;
-  post(HA_SENSORS[i].humidity ? EventType::Humidity : EventType::Temperature,
-       HA_SENSORS[i].area, 0, v);
+  post(g_layout.sens[i].humidity ? EventType::Humidity : EventType::Temperature,
+       g_layout.sens[i].area, 0, v);
 }
 
 // ------------------------------------------------------------
@@ -184,13 +172,13 @@ static void fetch_initial_states() {
   DynamicJsonDocument doc(768);
   char state[24];
 
-  for (uint8_t i = 0; i < HA_ENTITY_COUNT; i++) {
-    if (fetch_one_state(HA_ENTITIES[i].id, state, sizeof(state), doc))
+  for (uint8_t i = 0; i < g_layout.ent_n; i++) {
+    if (fetch_one_state(g_layout.ents[i].id, state, sizeof(state), doc))
       apply_entity_state(i, state, doc["attributes"]);
     vTaskDelay(pdMS_TO_TICKS(20));  // keep IDLE0 fed between requests
   }
-  for (uint8_t i = 0; i < HA_SENSOR_COUNT; i++) {
-    if (fetch_one_state(HA_SENSORS[i].id, state, sizeof(state), doc))
+  for (uint8_t i = 0; i < g_layout.sens_n; i++) {
+    if (fetch_one_state(g_layout.sens[i].id, state, sizeof(state), doc))
       apply_sensor_state(i, state);
     vTaskDelay(pdMS_TO_TICKS(20));
   }
@@ -218,20 +206,84 @@ static void send_subscribe() {
                    ID_SUBSCRIBE);
 
   bool first = true;
-  for (uint8_t i = 0; i < HA_ENTITY_COUNT; i++) {
-    n += snprintf(buf + n, sizeof(buf) - n, "%s\"%s\"", first ? "" : ",", HA_ENTITIES[i].id);
+  for (uint8_t i = 0; i < g_layout.ent_n; i++) {
+    n += snprintf(buf + n, sizeof(buf) - n, "%s\"%s\"", first ? "" : ",", g_layout.ents[i].id);
     first = false;
     if (n >= (int)sizeof(buf) - 64) break;
   }
-  for (uint8_t i = 0; i < HA_SENSOR_COUNT; i++) {
-    n += snprintf(buf + n, sizeof(buf) - n, "%s\"%s\"", first ? "" : ",", HA_SENSORS[i].id);
+  for (uint8_t i = 0; i < g_layout.sens_n; i++) {
+    n += snprintf(buf + n, sizeof(buf) - n, "%s\"%s\"", first ? "" : ",", g_layout.sens[i].id);
     first = false;
     if (n >= (int)sizeof(buf) - 64) break;
   }
   snprintf(buf + n, sizeof(buf) - n, "]}}");
 
   ws.sendTXT(buf);
-  Serial.printf("[ha] subscribed to %d entities\n", HA_ENTITY_COUNT + HA_SENSOR_COUNT);
+  Serial.printf("[ha] subscribed to %d entities\n", g_layout.ent_n + g_layout.sens_n);
+}
+
+// Layout pushes arrive as a custom HA event rather than over a second
+// socket or an HTTP server on the panel. Two reasons, both practical:
+// this connection is already open and already authenticated, and the
+// desktop tool therefore never has to find the panel's IP address on
+// the hotspot - it only has to know where HA is, which it does.
+static void send_subscribe_events() {
+  char buf[96];
+  snprintf(buf, sizeof(buf),
+           "{\"id\":%u,\"type\":\"subscribe_events\",\"event_type\":\"%s\"}",
+           ID_SUBSCRIBE_EVENTS, LAYOUT_EVENT);
+  ws.sendTXT(buf);
+  Serial.println("[ha] listening for " LAYOUT_EVENT);
+}
+
+// The one message too big for the filtered hot path, so it gets its
+// own parse. That cost is paid only when a push actually arrives;
+// every state event still goes through the small bounded document.
+static void handle_layout_push(uint8_t *payload, size_t len) {
+  StaticJsonDocument<128> filter;
+  filter["event"]["data"]["layout"] = true;
+
+  StaticJsonDocument<4096> doc;
+  DeserializationError jerr = deserializeJson(doc, payload, len,
+                                              DeserializationOption::Filter(filter));
+  if (jerr) {
+    Serial.printf("[layout] push will not parse: %s\n", jerr.c_str());
+    return;
+  }
+
+  JsonVariantConst layout = doc["event"]["data"]["layout"];
+  if (layout.isNull()) {
+    Serial.println("[layout] push carried no layout object");
+    return;
+  }
+
+  // Re-serialise just the layout subtree, so the bytes stored are
+  // exactly the bytes that boot - no second opinion about the format
+  // between receiving it and reading it back.
+  static char buf[LAYOUT_MAX_JSON + 1];
+  size_t n = serializeJson(layout, buf, sizeof(buf));
+  if (n == 0 || n >= sizeof(buf)) {
+    Serial.printf("[layout] push too large to store (>%u bytes)\n",
+                  (unsigned)LAYOUT_MAX_JSON);
+    return;
+  }
+
+  char err[160];
+  if (!layout_store_json(buf, n, err, sizeof(err))) {
+    // Rejected layouts leave the running one alone, so the panel
+    // keeps working. Say why - a push that silently does nothing is
+    // the worst version of this.
+    Serial.printf("[layout] push REJECTED: %s\n", err);
+    return;
+  }
+
+  // Restart rather than rebuilding the widgets live. LVGL's pool is a
+  // fixed 40KB and tearing down a screen's worth of objects to build
+  // another is where fragmentation bites - and OOM there is a hang,
+  // not an error. A reboot is a few seconds and is deterministic.
+  Serial.printf("[layout] stored %u bytes, restarting to apply\n", (unsigned)n);
+  delay(250);   // let the serial line drain
+  ESP.restart();
 }
 
 static void handle_text(uint8_t *payload, size_t len) {
@@ -241,6 +293,11 @@ static void handle_text(uint8_t *payload, size_t len) {
   filter["type"] = true;
   filter["success"] = true;
   filter["error"]["message"] = true;
+  // Enough to tell a layout push apart from a state trigger. The
+  // layout itself is deliberately not in this filter - it would not
+  // fit the 768-byte document below, which is the whole point of the
+  // document being that size.
+  filter["event"]["event_type"] = true;
   JsonObject trig = filter["event"]["variables"]["trigger"].to<JsonObject>();
   trig["entity_id"] = true;
   trig["to_state"]["state"] = true;
@@ -267,6 +324,7 @@ static void handle_text(uint8_t *payload, size_t len) {
     Serial.println("[ha] authenticated");
     authed = true;
     send_subscribe();
+    send_subscribe_events();
     post(EventType::Link, 0, (int32_t)LinkState::Online);
     post(EventType::DevicesAvailable, 0, 1);
     fetch_initial_states();
@@ -289,6 +347,12 @@ static void handle_text(uint8_t *payload, size_t len) {
   }
 
   if (strcmp(type, "event") == 0) {
+    const char *evt = doc["event"]["event_type"];
+    if (evt && strcmp(evt, LAYOUT_EVENT) == 0) {
+      handle_layout_push(payload, len);
+      return;
+    }
+
     JsonVariantConst t = doc["event"]["variables"]["trigger"];
     const char *eid = t["entity_id"];
     const char *state = t["to_state"]["state"];
@@ -348,8 +412,8 @@ static void send_service(const char *domain, const char *service,
 
 static void run_command(const Command &c) {
   if (c.type == EventType::AutomationRan) {
-    if (c.entity >= HA_ACTION_COUNT) return;
-    const char *eid = HA_ACTIONS[c.entity].id;
+    if (c.entity >= g_layout.act_n) return;
+    const char *eid = g_layout.acts[c.entity].id;
     char domain[16];
     domain_of(eid, domain, sizeof(domain));
     // Scenes and scripts are "turned on"; automations are triggered.
@@ -361,8 +425,8 @@ static void run_command(const Command &c) {
     return;
   }
 
-  if (c.entity >= HA_ENTITY_COUNT) return;
-  const char *eid = HA_ENTITIES[c.entity].id;
+  if (c.entity >= g_layout.ent_n) return;
+  const char *eid = g_layout.ents[c.entity].id;
   char domain[16];
   domain_of(eid, domain, sizeof(domain));
   char data[64];
@@ -461,21 +525,27 @@ static void net_task(void *) {
 // The UI wants EntityDesc; the layout header stores the entity_id
 // alongside it. Flattened once at start so transport_entity() can
 // hand out a stable pointer.
-static EntityDesc entities[HA_ENTITY_COUNT];
-static AutomationDesc automations[HA_ACTION_COUNT ? HA_ACTION_COUNT : 1];
+static EntityDesc entities[MAX_ENTITIES];
+static AutomationDesc automations[MAX_AUTOMATIONS];
 
 void transport_start() {
+  // Before anything reads the table: NVS if a layout was ever
+  // pushed, the compiled ha_layout.h otherwise.
+  layout_boot();
+
   event_q = xQueueCreate(48, sizeof(PanelEvent));
   cmd_q = xQueueCreate(16, sizeof(Command));
 
-  for (uint8_t i = 0; i < HA_ENTITY_COUNT; i++) {
-    entities[i].name = HA_ENTITIES[i].name;
-    entities[i].kind = HA_ENTITIES[i].kind;
-    entities[i].area = HA_ENTITIES[i].area;
-    entities[i].favourite = HA_ENTITIES[i].favourite;
+  // Built from g_layout, which layout_boot() has already filled
+  // from NVS or from the compiled fallback.
+  for (uint8_t i = 0; i < g_layout.ent_n; i++) {
+    entities[i].name = g_layout.ents[i].name;
+    entities[i].kind = g_layout.ents[i].kind;
+    entities[i].area = g_layout.ents[i].area;
+    entities[i].favourite = g_layout.ents[i].favourite;
   }
-  for (uint8_t i = 0; i < HA_ACTION_COUNT; i++)
-    automations[i].name = HA_ACTIONS[i].name;
+  for (uint8_t i = 0; i < g_layout.act_n; i++)
+    automations[i].name = g_layout.acts[i].name;
 
   if (!WIFI_SSID[0] || !HA_HOST[0] || !HA_TOKEN[0])
     Serial.println("[ha] WIFI_SSID / HA_HOST / HA_TOKEN empty - fill in include/secrets.h");
@@ -508,9 +578,9 @@ void transport_run_automation(uint8_t index) {
   enqueue(EventType::AutomationRan, index, 1);
 }
 
-uint8_t transport_entity_count() { return HA_ENTITY_COUNT; }
+uint8_t transport_entity_count() { return g_layout.ent_n; }
 const EntityDesc *transport_entity(uint8_t i) { return &entities[i]; }
-uint8_t transport_area_count() { return HA_AREA_COUNT; }
-const char *transport_area(uint8_t i) { return HA_AREAS[i]; }
-uint8_t transport_automation_count() { return HA_ACTION_COUNT; }
+uint8_t transport_area_count() { return g_layout.area_n; }
+const char *transport_area(uint8_t i) { return g_layout.areas[i]; }
+uint8_t transport_automation_count() { return g_layout.act_n; }
 const AutomationDesc *transport_automation(uint8_t i) { return &automations[i]; }
