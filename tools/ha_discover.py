@@ -75,6 +75,24 @@ LAYOUT_VERSION = 1
 # panel's IP address. Both ends only have to know where HA is.
 LAYOUT_EVENT = "homemesh_layout"
 
+# The panel's colours. Must match theme_defaults() in
+# src/panel_theme.cpp - these are the compiled look, and a layout that
+# names none of them produces exactly that.
+#
+# Order is the order they are offered in the designer, roughly most to
+# least worth changing.
+THEME_DEFAULTS = {
+    "bg":     "#101418",   # screen background
+    "tile":   "#2A2F36",   # device tile face
+    "on":     "#F5A623",   # an entity that is on
+    "accent": "#4C8DFF",   # sliders and brightness bars
+    "text":   "#FFFFFF",   # primary label text
+    "muted":  "#8A9099",   # secondary text
+    "ok":     "#3DDC84",   # status dot: connected
+    "warn":   "#F5A623",   # status dot: WiFi but no Home Assistant
+    "bad":    "#E5484D",   # status dot: no WiFi
+}
+
 
 def load_env():
     env = {}
@@ -352,7 +370,7 @@ def build_header(area_names, rows, acts, sensor_rows):
     return "\n".join(out)
 
 
-def build_layout(area_names, rows, acts, sensor_rows):
+def build_layout(area_names, rows, acts, sensor_rows, theme=None):
     """The delivery format: what gets pushed to the panel and stored.
 
     Deliberately terse - short keys, no whitespace when serialised -
@@ -362,7 +380,7 @@ def build_layout(area_names, rows, acts, sensor_rows):
 
     Order is significant: a page lays its tiles out in list order.
     """
-    return {
+    out = {
         "v": LAYOUT_VERSION,
         "areas": list(area_names),
         "entities": [
@@ -375,6 +393,20 @@ def build_layout(area_names, rows, acts, sensor_rows):
             for eid, area, is_hum in sensor_rows
         ],
     }
+
+    # Only colours that differ from the compiled defaults are sent.
+    # The firmware treats a missing colour as "keep the default", so
+    # an unstyled layout carries no theme object at all and costs
+    # nothing - and a theme that happens to match the defaults reads
+    # as what it is, rather than as a redundant copy of them.
+    if theme:
+        changed = {k: v for k, v in theme.items()
+                   if k in THEME_DEFAULTS
+                   and v.upper() != THEME_DEFAULTS[k].upper()}
+        if changed:
+            out["theme"] = changed
+
+    return out
 
 
 def dump_layout(layout):
@@ -407,10 +439,13 @@ async def push_layout(url, token, layout):
     return len(payload)
 
 
-def write_outputs(area_names, rows, acts, sensor_rows, log=print):
+def write_outputs(area_names, rows, acts, sensor_rows, theme=None, log=print):
+    # The header carries no theme: colours are a runtime concern now,
+    # and ha_layout.h is the fallback for a board that has never been
+    # pushed to - which by definition has the compiled colours.
     HEADER_OUT.write_text(build_header(area_names, rows, acts, sensor_rows),
                           encoding="utf-8")
-    payload = dump_layout(build_layout(area_names, rows, acts, sensor_rows))
+    payload = dump_layout(build_layout(area_names, rows, acts, sensor_rows, theme))
     LAYOUT_OUT.write_text(payload + "\n", encoding="utf-8")
     log(f"Wrote {HEADER_OUT}")
     log(f"Wrote {LAYOUT_OUT}  ({len(payload)} bytes)")

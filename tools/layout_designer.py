@@ -38,7 +38,7 @@ import sys
 import threading
 import tkinter as tk
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import colorchooser, messagebox, ttk
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -109,6 +109,8 @@ class Designer(tk.Tk):
         self.favourite = {}        # entity_id -> tk.BooleanVar
         self.order = []            # entity_ids, grouped by area, page order within
         self.tables = None         # last computed (area_names, rows, acts, sensors)
+        self.theme = dict(hd.THEME_DEFAULTS)
+        self.swatches = {}         # theme key -> the swatch widget
         self.msgq = queue.Queue()  # worker thread -> UI
 
         self._build_chrome()
@@ -194,6 +196,30 @@ class Designer(tk.Tk):
                                    "firmware can honour. Home order follows the room pages."))
         self.note.pack(fill="x", pady=(8, 0))
 
+        # ---- theme
+        theme_frame = tk.LabelFrame(right, text=" Colours ", bg=UI_PANEL, padx=8, pady=6)
+        theme_frame.pack(fill="x", pady=(10, 0))
+
+        row = tk.Frame(theme_frame, bg=UI_PANEL)
+        row.pack(fill="x")
+        for key in hd.THEME_DEFAULTS:
+            cell = tk.Frame(row, bg=UI_PANEL)
+            cell.pack(side="left", padx=(0, 10))
+            sw = tk.Label(cell, bg=self.theme[key], width=4, height=2,
+                          relief="solid", bd=1, cursor="hand2")
+            sw.pack()
+            sw.bind("<Button-1>", lambda _e, k=key: self._pick_colour(k))
+            tk.Label(cell, text=key, bg=UI_PANEL, fg="#666",
+                     font=("Segoe UI", 8)).pack()
+            self.swatches[key] = sw
+
+        tk.Button(row, text="Reset", width=7, command=self._reset_theme).pack(
+            side="left", padx=(8, 0))
+        tk.Label(theme_frame, bg=UI_PANEL, fg="#999", anchor="w", justify="left",
+                 font=("Segoe UI", 8),
+                 text="Click a swatch to change it. Only colours that differ from "
+                      "the defaults are sent.").pack(fill="x", pady=(4, 0))
+
         log_frame = tk.LabelFrame(right, text=" Output ", bg=UI_PANEL, padx=6, pady=6)
         log_frame.pack(fill="both", expand=True, pady=(10, 0))
         self.log_text = tk.Text(log_frame, height=9, bg="#1E2227", fg="#D6D9DD",
@@ -218,6 +244,30 @@ class Designer(tk.Tk):
 
     def _on_wheel(self, event):
         self.pick_canvas.yview_scroll(int(-event.delta / 120), "units")
+
+    # -----------------------------------------------------------
+    #  Theme
+    # -----------------------------------------------------------
+    def _pick_colour(self, key):
+        _rgb, hexval = colorchooser.askcolor(
+            color=self.theme[key], title=f"Panel colour: {key}", parent=self)
+        if not hexval:
+            return
+        self.theme[key] = hexval.upper()
+        self.swatches[key].config(bg=self.theme[key])
+        self._recompute()
+
+    def _reset_theme(self):
+        self.theme = dict(hd.THEME_DEFAULTS)
+        for key, sw in self.swatches.items():
+            sw.config(bg=self.theme[key])
+        self._recompute()
+
+    def _themed(self):
+        """Only what differs from the compiled defaults, matching what
+        build_layout() will actually send."""
+        return {k: v for k, v in self.theme.items()
+                if v.upper() != hd.THEME_DEFAULTS[k].upper()}
 
     def log(self, msg=""):
         self.log_text.configure(state="normal")
@@ -400,7 +450,8 @@ class Designer(tk.Tk):
         self.order = [r[0] for r in sorted(rows, key=lambda r: r[3])]
 
         area_names, rows, acts, sensors = self.tables
-        payload = hd.dump_layout(hd.build_layout(area_names, rows, acts, sensors))
+        payload = hd.dump_layout(hd.build_layout(area_names, rows, acts, sensors,
+                                                 self._themed()))
         self._set_log(
             f"{len(rows)} entities across {len(area_names)} rooms, "
             f"{sum(1 for r in rows if r[4])} on Home, {len(sensors)} sensors, "
@@ -433,7 +484,8 @@ class Designer(tk.Tk):
         for page, title in enumerate(titles):
             frame = tk.Frame(self.nb, bg=UI_BG, padx=10, pady=10)
             cv = tk.Canvas(frame, width=PANEL_W * SCALE, height=PANEL_H * SCALE,
-                           bg=COL_BG, highlightthickness=1, highlightbackground="#999")
+                           bg=self.theme["bg"], highlightthickness=1,
+                           highlightbackground="#999")
             cv.pack()
             self.nb.add(frame, text=title)
             self.page_canvases.append(cv)
@@ -444,17 +496,21 @@ class Designer(tk.Tk):
 
     def _draw_page(self, cv, page, title):
         cv.delete("all")
+        t = self.theme
         s = SCALE
         ents = self._page_entities(page)
 
         # Header, as ui/dashboard.cpp draws it.
+        # create_header() in dashboard.cpp fills the bar with COL_BG,
+        # so the header is not a distinct shade.
+        cv.configure(bg=t["bg"])
         cv.create_rectangle(0, 0, PANEL_W * s, HEADER_H * s,
-                            fill="#171C21", outline="")
+                            fill=t["bg"], outline="")
         cv.create_text(GAP * s, HEADER_H * s / 2, text=title, anchor="w",
-                       fill=COL_TEXT, font=("Segoe UI", 9 * s // 2 + 4))
+                       fill=t["text"], font=("Segoe UI", 9 * s // 2 + 4))
         cv.create_oval(PANEL_W * s - GAP * s - 14, HEADER_H * s / 2 - 7,
                        PANEL_W * s - GAP * s, HEADER_H * s / 2 + 7,
-                       fill=COL_OK, outline="")
+                       fill=t["ok"], outline="")
         # Sensor slots are drawn as placeholders, never as numbers. A
         # plausible-looking 21.5 degrees in a design tool is the same
         # mistake as inventing template sensors for the rooms that have
@@ -463,12 +519,12 @@ class Designer(tk.Tk):
         if sensors:
             slots = "  ".join("--.-°" if not r[2] else "--%" for r in sensors)
             cv.create_text(PANEL_W * s - 34 * s, HEADER_H * s / 2,
-                           text=slots, anchor="e", fill=COL_MUTED,
+                           text=slots, anchor="e", fill=t["muted"],
                            font=("Segoe UI", 8))
 
         if not ents:
             cv.create_text(PANEL_W * s / 2, PANEL_H * s / 2, text="Nothing here",
-                           fill=COL_MUTED, font=("Segoe UI", 11))
+                           fill=t["muted"], font=("Segoe UI", 11))
             self._bind_drag(cv, page, [])
             return
 
@@ -477,16 +533,16 @@ class Designer(tk.Tk):
             eid, name, kind, area, fav = ent
             tag = f"slot{k}"
             cv.create_rectangle(x * s, y * s, (x + w) * s, (y + h) * s,
-                                fill=COL_TILE, outline="#3A4047", width=1,
+                                fill=t["tile"], outline=t["muted"], width=1,
                                 tags=("tile", tag))
             cv.create_text((x + 10) * s, (y + 14) * s, text=name, anchor="w",
-                           fill=COL_TEXT, font=("Segoe UI", 9), width=(w - 16) * s,
+                           fill=t["text"], font=("Segoe UI", 9), width=(w - 16) * s,
                            tags=("tile", tag))
             cv.create_text((x + 10) * s, (y + h - 14) * s, text="Off", anchor="w",
-                           fill=COL_MUTED, font=("Segoe UI", 8), tags=("tile", tag))
+                           fill=t["muted"], font=("Segoe UI", 8), tags=("tile", tag))
             if fav:
                 cv.create_text((x + w - 10) * s, (y + 12) * s, text="★",
-                               anchor="e", fill=COL_ON, font=("Segoe UI", 9),
+                               anchor="e", fill=t["on"], font=("Segoe UI", 9),
                                tags=("tile", tag))
             if kind != "Toggle":
                 # The mini brightness bar, gated on kind != Toggle in
@@ -494,10 +550,10 @@ class Designer(tk.Tk):
                 # of classify() picking RGB or Dimmable.
                 by = (y + h - 7) * s
                 cv.create_rectangle((x + 10) * s, by - 3, (x + w - 10) * s, by + 3,
-                                    fill="#3A4047", outline="", tags=("tile", tag))
+                                    fill=t["muted"], outline="", tags=("tile", tag))
                 cv.create_rectangle((x + 10) * s, by - 3,
                                     (x + 10) * s + ((w - 20) * s) * 0.6, by + 3,
-                                    fill=COL_ACCENT, outline="", tags=("tile", tag))
+                                    fill=t["accent"], outline="", tags=("tile", tag))
 
         self._bind_drag(cv, page, rects)
 
@@ -583,6 +639,17 @@ class Designer(tk.Tk):
             return
         if saved.get("v") != hd.LAYOUT_VERSION:
             return
+        # The swatches were built from the defaults in _build_chrome,
+        # which runs first - so they have to be caught up here.
+        saved_theme = saved.get("theme") or {}
+        for k, v in saved_theme.items():
+            if k in self.theme:
+                self.theme[k] = str(v).upper()
+                if k in self.swatches:
+                    self.swatches[k].config(bg=self.theme[k])
+        if saved_theme:
+            self.log(f"loaded {len(saved_theme)} custom colour(s)")
+
         ents = saved.get("entities", [])
         self.order = [e["id"] for e in ents]
         for e in ents:
@@ -602,7 +669,7 @@ class Designer(tk.Tk):
             messagebox.showwarning("Nothing to push",
                                    "Tick at least one entity first.")
             return
-        layout = hd.build_layout(*self.tables)
+        layout = hd.build_layout(*self.tables, theme=self._themed())
         self.push_btn.config(state="disabled", text="Pushing...")
         threading.Thread(target=self._push, args=(layout,), daemon=True).start()
 
@@ -624,7 +691,8 @@ class Designer(tk.Tk):
                                    "Tick at least one entity before writing a layout.")
             return
         lines = []
-        hd.write_outputs(area_names, rows, acts, sensors, log=lines.append)
+        hd.write_outputs(area_names, rows, acts, sensors,
+                         theme=self._themed(), log=lines.append)
         for line in lines:
             self.log(line)
         self.log("rebuild and reflash env:ha to put this on the panel")

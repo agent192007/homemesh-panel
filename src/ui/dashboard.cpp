@@ -3,6 +3,7 @@
 #include <lvgl.h>
 #include <stdio.h>
 
+#include "../panel_theme.h"
 #include "../transport.h"
 
 // ------------------------------------------------------------
@@ -23,15 +24,23 @@ static const lv_coord_t HEADER_H = 28;
 static const lv_coord_t BODY_H = 240 - HEADER_H;
 static const lv_coord_t GAP = 8;
 
-#define COL_BG      lv_color_hex(0x101418)
-#define COL_TILE    lv_color_hex(0x2A2F36)
-#define COL_ON      lv_color_hex(0xF5A623)
-#define COL_ACCENT  lv_color_hex(0x4C8DFF)
-#define COL_TEXT    lv_color_white()
-#define COL_MUTED   lv_color_hex(0x8A9099)
-#define COL_OK      lv_color_hex(0x3DDC84)
-#define COL_WARN    lv_color_hex(0xF5A623)
-#define COL_BAD     lv_color_hex(0xE5484D)
+// Colours come from g_theme, which the transport fills before
+// dashboard_create() runs - from a pushed layout's optional "theme"
+// object, or from the compiled defaults in panel_theme.cpp.
+//
+// Kept as macros with the same names so the ~34 use sites below did
+// not have to change. Each one is a read of a uint32_t and an
+// lv_color_hex(), both trivial, and the values do not move while a
+// screen is being built.
+#define COL_BG      lv_color_hex(g_theme.bg)
+#define COL_TILE    lv_color_hex(g_theme.tile)
+#define COL_ON      lv_color_hex(g_theme.on)
+#define COL_ACCENT  lv_color_hex(g_theme.accent)
+#define COL_TEXT    lv_color_hex(g_theme.text)
+#define COL_MUTED   lv_color_hex(g_theme.muted)
+#define COL_OK      lv_color_hex(g_theme.ok)
+#define COL_WARN    lv_color_hex(g_theme.warn)
+#define COL_BAD     lv_color_hex(g_theme.bad)
 
 // One rendered tile. A favourite has two of these - one on Home, one
 // on its room page - so refreshes walk the list rather than indexing

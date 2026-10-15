@@ -1,4 +1,5 @@
 #include "layout_store.h"
+#include "panel_theme.h"
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -50,6 +51,56 @@ static const char *intern(const char *s) {
   return dst;
 }
 
+// A colour may arrive as "#RRGGBB", "RRGGBB", or a plain number.
+// Accepts all three rather than being strict about it - the cost of
+// being wrong is a colour, and rejecting a whole layout over one
+// would be out of proportion.
+static bool colour_from(JsonVariantConst v, uint32_t *out) {
+  if (v.isNull()) return false;
+  if (v.is<unsigned int>()) {
+    *out = v.as<unsigned int>() & 0xFFFFFF;
+    return true;
+  }
+  const char *s = v.as<const char *>();
+  if (!s) return false;
+  if (*s == '#') s++;
+  if (strlen(s) != 6) return false;
+  char *end = nullptr;
+  unsigned long n = strtoul(s, &end, 16);
+  if (end != s + 6) return false;
+  *out = (uint32_t)(n & 0xFFFFFF);
+  return true;
+}
+
+// Fills g_theme from an optional "theme" object. Anything absent or
+// malformed keeps its compiled default, so a partial theme is valid
+// and there is no state where a colour is undefined.
+static void apply_theme(JsonObjectConst root) {
+  theme_defaults(&g_theme);
+
+  JsonObjectConst t = root["theme"];
+  if (t.isNull()) return;
+
+  struct { const char *key; uint32_t *field; } map[] = {
+    { "bg",     &g_theme.bg     },
+    { "tile",   &g_theme.tile   },
+    { "on",     &g_theme.on     },
+    { "accent", &g_theme.accent },
+    { "text",   &g_theme.text   },
+    { "muted",  &g_theme.muted  },
+    { "ok",     &g_theme.ok     },
+    { "warn",   &g_theme.warn   },
+    { "bad",    &g_theme.bad    },
+  };
+
+  uint8_t n = 0;
+  for (auto &m : map) {
+    if (colour_from(t[m.key], m.field)) n++;
+  }
+  if (n) Serial.printf("[layout] theme: %u of %u colours set\n",
+                       n, (unsigned)PANEL_THEME_FIELDS);
+}
+
 static EntityKind kind_from(const char *s) {
   if (!s) return EntityKind::Toggle;
   if (strcmp(s, "RGB") == 0) return EntityKind::RGB;
@@ -94,6 +145,9 @@ static void load_builtin() {
     g_layout.sens[i].area = HA_SENSORS[i].area;
     g_layout.sens[i].humidity = HA_SENSORS[i].humidity;
   }
+
+  // No pushed layout means no pushed theme either.
+  theme_defaults(&g_theme);
 
   // These point into flash, not the arena, so nothing is copied.
   g_layout.from_nvs = false;
@@ -235,6 +289,8 @@ static bool populate(JsonObjectConst root) {
     d.humidity = s["hum"] | false;
     g_layout.sens_n++;
   }
+
+  apply_theme(root);
 
   g_layout.from_nvs = true;
   return true;
