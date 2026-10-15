@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 """
 HomeMesh: read the entity and area registries out of Home Assistant and
-emit the panel's layout header.
+emit the panel's layout.
 
 This is the PC half of the split described in CLAUDE.md. get_states on a
 real instance is hundreds of KB, which will not fit on a WROOM-32 with no
 PSRAM - so discovery happens here, and the firmware only ever subscribes
-to the handful of entity_ids this writes into include/ha_layout.h.
+to the handful of entity_ids this writes out.
 
-It is also the seed of the desktop authoring tool: the picker and the
-drag-and-drop canvas replace the --include/--favourite flags later, but
-the output format stays the same.
+Two consumers share this module, and that is the point of its shape:
+
+    ha_discover.py      flags-only CLI (this file's main())
+    layout_designer.py  the desktop authoring application
+
+Both call fetch_inventory() / select_layout() / build_header() /
+build_layout(), so the output format is defined exactly once. Changing
+how a layout is authored must not change what a layout is.
 
 Usage:
     python tools/ha_discover.py --list
@@ -36,6 +41,7 @@ except ImportError:
 
 HERE = Path(__file__).resolve().parent
 HEADER_OUT = HERE.parent / "include" / "ha_layout.h"
+LAYOUT_OUT = HERE.parent / "include" / "ha_layout.json"
 
 # Domains the panel can actually control, mapped to how they are driven.
 TOGGLE_DOMAINS = {"switch", "fan", "input_boolean"}
@@ -55,6 +61,11 @@ MAX_ENTITIES = 12
 MAX_AUTOMATIONS = 8
 MAX_PER_PAGE = 6
 
+# The layout format version the firmware checks. Bump only on a
+# breaking change - the panel should refuse a version it does not know
+# rather than guess at fields.
+LAYOUT_VERSION = 1
+
 
 def load_env():
     env = {}
@@ -66,6 +77,14 @@ def load_env():
                 k, v = line.split("=", 1)
                 env[k.strip()] = v.strip().strip('"').strip("'")
     return env
+
+
+def resolve_credentials(url=None, token=None):
+    """Explicit argument, then tools/.env, then the environment."""
+    env = load_env()
+    url = url or env.get("HA_URL") or os.environ.get("HA_URL")
+    token = token or env.get("HA_TOKEN") or os.environ.get("HA_TOKEN")
+    return url, token
 
 
 class HA:
@@ -114,28 +133,36 @@ def classify(state):
     return None
 
 
-def c_str(s):
-    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+class Inventory:
+    """Everything the panel could possibly show, already filtered and
+    sorted. Keyed by area id rather than area name, so a selection
+    survives a room being renamed in HA."""
+
+    def __init__(self, controllable, actions, sensors, area_name):
+        self.controllable = controllable  # (eid, name, kind, area_id)
+        self.actions = actions            # (eid, name)
+        self.sensors = sensors            # (eid, name, device_class, area_id)
+        self.area_name = area_name        # area_id -> display name
+
+    def area_of(self, area_id):
+        return self.area_name.get(area_id, "(no area)")
 
 
-async def run(args):
-    env = load_env()
-    url = args.url or env.get("HA_URL") or os.environ.get("HA_URL")
-    token = args.token or env.get("HA_TOKEN") or os.environ.get("HA_TOKEN")
-    if not url or not token:
-        sys.exit("Set HA_URL and HA_TOKEN in tools/.env, or pass --url/--token.")
-
+async def fetch_inventory(url, token):
     ws = await connect(url, token)
     ha = HA(ws)
-
-    states = await ha.cmd("get_states")
-    areas = await ha.cmd("config/area_registry/list")
-    ent_reg = await ha.cmd("config/entity_registry/list")
-    dev_reg = await ha.cmd("config/device_registry/list")
-    await ws.close()
+    try:
+        states = await ha.cmd("get_states")
+        areas = await ha.cmd("config/area_registry/list")
+        ent_reg = await ha.cmd("config/entity_registry/list")
+        dev_reg = await ha.cmd("config/device_registry/list")
+    finally:
+        await ws.close()
 
     area_name = {a["area_id"]: a["name"] for a in areas}
     dev_area = {d["id"]: d.get("area_id") for d in dev_reg}
+    # Entity-level area wins over the device's, matching HA's own
+    # resolution order.
     ent_area = {}
     for e in ent_reg:
         a = e.get("area_id") or dev_area.get(e.get("device_id"))
@@ -164,29 +191,38 @@ async def run(args):
     actions.sort(key=lambda r: r[1])
     sensors.sort(key=lambda r: (area_name.get(r[3], "~"), r[2], r[1]))
 
-    if args.list:
-        print(f"\n{len(controllable)} controllable entities:\n")
-        for eid, name, kind, area in controllable:
-            print(f"  {kind:<9} {area_name.get(area, '(no area)'):<16} {name:<26} {eid}")
-        print(f"\n{len(actions)} runnable (scenes/scripts/automations):\n")
-        for eid, name in actions:
-            print(f"  {name:<26} {eid}")
-        print(f"\n{len(sensors)} temperature/humidity sensors:\n")
-        for eid, name, dc, area in sensors:
-            print(f"  {dc:<12} {area_name.get(area, '(no area)'):<16} {name:<26} {eid}")
-        print("\nPick with --include, mark Home-page entries with --favourite.")
-        print("Sensors are picked up automatically for whichever areas you use.\n")
-        return
+    return Inventory(controllable, actions, sensors, area_name)
 
-    include = set(x.strip() for x in args.include.split(",") if x.strip()) if args.include else None
-    favourite = set(x.strip() for x in args.favourite.split(",") if x.strip())
-    run_ids = set(x.strip() for x in args.automations.split(",") if x.strip()) if args.automations else None
 
-    chosen = [r for r in controllable if include is None or r[0] in include]
+def select_layout(inv, include=None, favourite=(), automations=None,
+                  order=None, log=print):
+    """Turn a selection into the four tables a layout is made of.
+
+    include     entity_ids to place, or None for everything controllable
+    favourite   entity_ids that also appear on the Home page
+    automations scene/script/automation entity_ids, or None for all
+    order       entity_ids in the order they should occupy tile slots.
+                A tile's position is purely its order within its page -
+                see grid_for() in ui/dashboard.cpp - so this is what the
+                authoring tool's drag-and-drop actually edits.
+
+    Returns (area_names, rows, acts, sensor_rows) where rows are
+    (eid, name, kind, area_index, favourite).
+    """
+    favourite = set(favourite)
+    chosen = [r for r in inv.controllable if include is None or r[0] in include]
+
     if include:
-        missing = include - {r[0] for r in chosen}
+        missing = set(include) - {r[0] for r in chosen}
         if missing:
-            sys.exit(f"Not found or not controllable: {', '.join(sorted(missing))}")
+            raise ValueError("Not found or not controllable: "
+                             + ", ".join(sorted(missing)))
+
+    if order:
+        # Anything unranked sorts after everything ranked, keeping its
+        # existing relative order.
+        rank = {eid: i for i, eid in enumerate(order)}
+        chosen.sort(key=lambda r: rank.get(r[0], len(rank)))
 
     # Areas that survive, in first-seen order. Entities with no area are
     # dropped rather than invented into one.
@@ -197,10 +233,10 @@ async def run(args):
         elif area not in used_areas:
             used_areas.append(area)
     if dropped:
-        print(f"note: {len(dropped)} entity(ies) have no area in HA and were skipped:")
+        log(f"note: {len(dropped)} entity(ies) have no area in HA and were skipped:")
         for d in dropped:
-            print(f"      {d}")
-        print("      assign an area in HA, or they cannot be placed on a room page.")
+            log(f"      {d}")
+        log("      assign an area in HA, or they cannot be placed on a room page.")
     used_areas = used_areas[:MAX_AREAS]
 
     rows, per_area = [], {}
@@ -210,14 +246,20 @@ async def run(args):
         idx = used_areas.index(area)
         per_area.setdefault(idx, 0)
         if per_area[idx] >= MAX_PER_PAGE:
-            print(f"note: {area_name[area]} page is full, skipping {eid}")
+            log(f"note: {inv.area_of(area)} page is full, skipping {eid}")
             continue
         per_area[idx] += 1
         rows.append((eid, name, kind, idx, eid in favourite))
         if len(rows) >= MAX_ENTITIES:
             break
 
-    acts = [a for a in actions if run_ids is None or a[0] in run_ids][:MAX_AUTOMATIONS]
+    n_fav = sum(1 for r in rows if r[4])
+    if n_fav > MAX_PER_PAGE:
+        log(f"note: {n_fav} favourites but the Home page holds "
+            f"{MAX_PER_PAGE}; the extras will not be shown.")
+
+    acts = [a for a in inv.actions
+            if automations is None or a[0] in automations][:MAX_AUTOMATIONS]
 
     # One temperature and one humidity sensor per area, chosen
     # automatically - the header has exactly two slots per room and
@@ -227,21 +269,37 @@ async def run(args):
     sensor_rows = []
     for idx, area in enumerate(used_areas):
         for dc in ("temperature", "humidity"):
-            match = next((s for s in sensors if s[3] == area and s[2] == dc), None)
+            match = next((s for s in inv.sensors if s[3] == area and s[2] == dc), None)
             if match:
                 sensor_rows.append((match[0], idx, dc == "humidity"))
         if not any(r[1] == idx for r in sensor_rows):
-            print(f"note: {area_name[area]} has no temperature or humidity sensor")
+            log(f"note: {inv.area_of(area)} has no temperature or humidity sensor")
 
+    area_names = [inv.area_name[a] for a in used_areas]
+    return area_names, rows, acts, sensor_rows
+
+
+def c_str(s):
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def build_header(area_names, rows, acts, sensor_rows):
+    """The compile-time path: include/ha_layout.h.
+
+    Still the mechanism today. Once the panel stores a layout in NVS
+    this becomes the fallback the firmware boots from when NVS is
+    empty, which is why it is generated from the same tables as the
+    JSON rather than by a separate code path.
+    """
     out = ["#pragma once", "",
            "// Generated by tools/ha_discover.py - do not edit by hand.",
            "// Regenerate after changing areas or entity selection in HA.",
            "",
            '#include "../src/panel_model.h"', "",
-           f"#define HA_AREA_COUNT {len(used_areas)}",
+           f"#define HA_AREA_COUNT {len(area_names)}",
            "static const char *HA_AREAS[] = {"]
-    for a in used_areas:
-        out.append(f"  {c_str(area_name[a])},")
+    for name in area_names:
+        out.append(f"  {c_str(name)},")
     out += ["};", "",
             "struct HaEntityCfg {",
             "  const char *id;",
@@ -282,12 +340,86 @@ async def run(args):
     if not sensor_rows:
         out.append('  { "", 0, false },')
     out += ["};", ""]
+    return "\n".join(out)
 
-    HEADER_OUT.write_text("\n".join(out), encoding="utf-8")
-    print(f"\nWrote {HEADER_OUT}")
-    print(f"  {len(used_areas)} areas, {len(rows)} entities "
-          f"({sum(1 for r in rows if r[4])} favourites), {len(acts)} actions, "
-          f"{len(sensor_rows)} sensors")
+
+def build_layout(area_names, rows, acts, sensor_rows):
+    """The delivery format: what gets pushed to the panel and stored.
+
+    Deliberately terse - short keys, no whitespace when serialised -
+    because the ESP32 parses this alongside a 40KB LVGL heap. The
+    nine-entity demo layout comes to well under a kilobyte, against
+    the hundreds of KB a get_states would cost.
+
+    Order is significant: a page lays its tiles out in list order.
+    """
+    return {
+        "v": LAYOUT_VERSION,
+        "areas": list(area_names),
+        "entities": [
+            {"id": eid, "name": name, "kind": kind, "area": area, "fav": fav}
+            for eid, name, kind, area, fav in rows
+        ],
+        "actions": [{"id": eid, "name": name} for eid, name in acts],
+        "sensors": [
+            {"id": eid, "area": area, "hum": is_hum}
+            for eid, area, is_hum in sensor_rows
+        ],
+    }
+
+
+def dump_layout(layout):
+    """Compact JSON - the exact bytes the panel will receive."""
+    return json.dumps(layout, separators=(",", ":"), ensure_ascii=False)
+
+
+def write_outputs(area_names, rows, acts, sensor_rows, log=print):
+    HEADER_OUT.write_text(build_header(area_names, rows, acts, sensor_rows),
+                          encoding="utf-8")
+    payload = dump_layout(build_layout(area_names, rows, acts, sensor_rows))
+    LAYOUT_OUT.write_text(payload + "\n", encoding="utf-8")
+    log(f"Wrote {HEADER_OUT}")
+    log(f"Wrote {LAYOUT_OUT}  ({len(payload)} bytes)")
+    log(f"  {len(area_names)} areas, {len(rows)} entities "
+        f"({sum(1 for r in rows if r[4])} favourites), {len(acts)} actions, "
+        f"{len(sensor_rows)} sensors")
+
+
+async def run(args):
+    url, token = resolve_credentials(args.url, args.token)
+    if not url or not token:
+        sys.exit("Set HA_URL and HA_TOKEN in tools/.env, or pass --url/--token.")
+
+    inv = await fetch_inventory(url, token)
+
+    if args.list:
+        print(f"\n{len(inv.controllable)} controllable entities:\n")
+        for eid, name, kind, area in inv.controllable:
+            print(f"  {kind:<9} {inv.area_of(area):<16} {name:<26} {eid}")
+        print(f"\n{len(inv.actions)} runnable (scenes/scripts/automations):\n")
+        for eid, name in inv.actions:
+            print(f"  {name:<26} {eid}")
+        print(f"\n{len(inv.sensors)} temperature/humidity sensors:\n")
+        for eid, name, dc, area in inv.sensors:
+            print(f"  {dc:<12} {inv.area_of(area):<16} {name:<26} {eid}")
+        print("\nPick with --include, mark Home-page entries with --favourite.")
+        print("Sensors are picked up automatically for whichever areas you use.")
+        print("Or author it visually: python tools/layout_designer.py\n")
+        return
+
+    def csv(s):
+        return set(x.strip() for x in s.split(",") if x.strip()) if s else None
+
+    try:
+        tables = select_layout(inv,
+                               include=csv(args.include),
+                               favourite=csv(args.favourite) or (),
+                               automations=csv(args.automations))
+    except ValueError as e:
+        sys.exit(str(e))
+
+    print()
+    write_outputs(*tables)
 
 
 def main():
