@@ -247,6 +247,18 @@ static void send_subscribe_events() {
 // just a push. Only the net task touches this.
 static StaticJsonDocument<4096> layout_doc;
 
+// Bounded substring search over a raw frame. The WebSockets library
+// does not promise a NUL terminator on the payload, so this does not
+// assume one.
+static bool frame_contains(const uint8_t *p, size_t len, const char *needle) {
+  size_t n = strlen(needle);
+  if (len < n) return false;
+  for (size_t i = 0; i + n <= len; i++) {
+    if (memcmp(p + i, needle, n) == 0) return true;
+  }
+  return false;
+}
+
 static void handle_layout_push(uint8_t *payload, size_t len) {
   StaticJsonDocument<128> filter;
   filter["event"]["data"]["layout"] = true;
@@ -297,20 +309,40 @@ static void handle_layout_push(uint8_t *payload, size_t len) {
 static void handle_text(uint8_t *payload, size_t len) {
   // Filtered so a state event carrying a long attribute list still
   // parses into a small fixed document.
-  StaticJsonDocument<256> filter;
+  // Route a layout push on the raw bytes, before any parsing.
+  //
+  // This used to be decided from the filtered document, and it failed
+  // silently: the filter below is a fixed-size document, and when a
+  // key does not fit ArduinoJson drops it without an error. The panel
+  // then parsed the frame, found no event_type, and ignored the push
+  // with nothing on the console to say so. A bounded search of the
+  // frame cannot fail that way, and costs one pass over ~900 bytes on
+  // a message that arrives once in a while.
+  if (frame_contains(payload, len, "\"" LAYOUT_EVENT "\"")) {
+    Serial.printf("[layout] push received, %u bytes\n", (unsigned)len);
+    handle_layout_push(payload, len);
+    return;
+  }
+
+  // 512, not 256. The filter is about 14 nested keys and was close
+  // enough to full that adding one more silently truncated it.
+  StaticJsonDocument<512> filter;
   filter["type"] = true;
   filter["success"] = true;
   filter["error"]["message"] = true;
-  // Enough to tell a layout push apart from a state trigger. The
-  // layout itself is deliberately not in this filter - it would not
-  // fit the 768-byte document below, which is the whole point of the
-  // document being that size.
-  filter["event"]["event_type"] = true;
   JsonObject trig = filter["event"]["variables"]["trigger"].to<JsonObject>();
   trig["entity_id"] = true;
   trig["to_state"]["state"] = true;
   trig["to_state"]["attributes"]["brightness"] = true;
   trig["to_state"]["attributes"]["rgb_color"] = true;
+
+  // Say so loudly rather than quietly misbehaving. An overflowed
+  // filter means some state updates stop arriving, which looks like a
+  // flaky network rather than a sizing bug.
+  if (filter.overflowed()) {
+    Serial.println("[ha] FILTER OVERFLOWED - increase its size, "
+                   "state updates will be missing");
+  }
 
   StaticJsonDocument<768> doc;
   DeserializationError err = deserializeJson(doc, payload, len,
@@ -318,6 +350,9 @@ static void handle_text(uint8_t *payload, size_t len) {
   if (err) {
     Serial.printf("[ha] parse: %s\n", err.c_str());
     return;
+  }
+  if (doc.overflowed()) {
+    Serial.printf("[ha] document overflowed on a %u-byte frame\n", (unsigned)len);
   }
 
   const char *type = doc["type"];
@@ -359,12 +394,6 @@ static void handle_text(uint8_t *payload, size_t len) {
   }
 
   if (strcmp(type, "event") == 0) {
-    const char *evt = doc["event"]["event_type"];
-    if (evt && strcmp(evt, LAYOUT_EVENT) == 0) {
-      handle_layout_push(payload, len);
-      return;
-    }
-
     JsonVariantConst t = doc["event"]["variables"]["trigger"];
     const char *eid = t["entity_id"];
     const char *state = t["to_state"]["state"];
