@@ -6,32 +6,45 @@ talking to Home Assistant. Local-first, no cloud.
 Academic project, VIT Chennai. Carries 70% of the grade.
 
 **The 70% review is done and went well.** What remains is the final
-review and submission, **20 October**. Prioritise an impressive working
+review and submission, **22 October** (moved from the 20th on 17 Oct).
+Prioritise an impressive working
 demo over elegance — and at this point, prioritise the report over new
 capability, because the engineering is essentially where this file says
 it should be and the report is not.
 
-## Pick up here (end of 16 Oct)
+## Pick up here (17 Oct)
 
-Four days left. In order:
+Five days. Current work is **UI appearance** — the functional
+architecture is done, and the panel looking plain is now the weakest
+part of the demo. In order:
 
-1. **Prove a layout push on the board.** This is the only part of the
-   architecture never confirmed on hardware. HA's side is verified;
-   the panel went offline before the fix could be flashed. Flash
-   `env:ha`, push from the designer, and look for
+1. **Icons per entity** (in progress, 17 Oct). Device-type glyphs in
+   the empty centre of each tile. See "What is left" item 1c.
+2. **Tile polish** — gradient background, use of the dead space,
+   on-state weight. Cheap, and it is most of the perceived difference.
+3. **Prove a layout push on the board.** Still the only part of the
+   architecture never confirmed on hardware. HA's side is verified.
+   Flash `env:ha`, push from the designer, and look for
    `[layout] push received` then `[layout] loaded from NVS`.
-2. **Run the microSD triage** (`pio run -e sdscan -t upload -t monitor`).
-   Five minutes, never run. It decides whether the 128GB card is a
-   feature or just hardware that happens to be fitted — and the
-   diagrams should not be redrawn until that is known.
-3. **Update the report material.** `docs/` describes a version of this
-   project that no longer exists. See "What is left" item 4.
+4. **Update the report material.** `docs/` describes a version of this
+   project that no longer exists. See item 4. Do this *after* the UI
+   work so the screenshots are of the final thing.
 
-Not blocking, and arguably not worth starting: retiring MQTT.
+Wanted but not yet started, and first to cut: **multi-column tiles**
+(a 2-wide widget with its controls inline rather than behind the
+chevron). This is format surgery — `span` in the layout, real
+placement instead of `grid_for()`'s arithmetic, and the designer's
+preview and drag both have to understand it. A day and a half done
+properly, most of it in the designer.
 
-The last session ended with the board physically disconnected —
-`getportnames` returned nothing. Replug before assuming anything is
-broken.
+Also wanted, and argued down: a **background image**. 320x240 RGB565
+is 150 KB and tiles cover most of it. A gradient gets most of the
+effect for no bytes.
+
+Not worth starting before the deadline: retiring MQTT, microSD work.
+The microSD triage (`pio run -e sdscan -t upload -t monitor`) is still
+five minutes and still never run — do it before the card appears in
+any diagram.
 
 ## Where the project is going
 
@@ -393,7 +406,7 @@ Cut list, in order, if behind schedule: drag-and-drop authoring (fall
 back to a checkbox picker and a fixed 2x2 grid), brightness sliders,
 second screen, animations. **Nothing has been cut as of 16 Oct** — the
 first item on that list shipped instead. If something has to give in
-the last four days, give up the microSD work and retiring MQTT, not
+the last days, give up the microSD work and retiring MQTT, not
 anything on this list.
 
 ## What is left
@@ -570,9 +583,7 @@ the PNGs. It needs Pillow.
 ## Safety net
 
 - Git repo: `https://github.com/agent192007/homemesh-panel` (private).
-  **12 commits ahead of `origin/main` as of the end of 16 Oct — the
-  runtime layout, theming and the desktop app are local only.** Push
-  before relying on the remote as a backup.
+  Pushed and current as of the end of 16 Oct, tags included.
 - Tag **`v0.3-runtime-layout`** is current: the panel reads its entity
   table from NVS, falling back to the compiled `ha_layout.h`. Boots
   clean on the board, 15 Oct. Rollback is
