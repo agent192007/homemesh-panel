@@ -1,0 +1,66 @@
+{
+  "light": {
+    "mdi": "lightbulb",
+    "cp": "F0335"
+  },
+  "ceiling": {
+    "mdi": "ceiling-light",
+    "cp": "F0769"
+  },
+  "lamp": {
+    "mdi": "lamp",
+    "cp": "F06B5"
+  },
+  "strip": {
+    "mdi": "led-strip-variant",
+    "cp": "F1051"
+  },
+  "fan": {
+    "mdi": "fan",
+    "cp": "F0210"
+  },
+  "ac": {
+    "mdi": "air-conditioner",
+    "cp": "F001B"
+  },
+  "toggle": {
+    "mdi": "toggle-switch",
+    "cp": "F0521"
+  },
+  "plug": {
+    "mdi": "power-plug",
+    "cp": "F06A5"
+  },
+  "temp": {
+    "mdi": "thermometer",
+    "cp": "F050F"
+  },
+  "humidity": {
+    "mdi": "water-percent",
+    "cp": "F058E"
+  },
+  "tv": {
+    "mdi": "television",
+    "cp": "F0502"
+  },
+  "speaker": {
+    "mdi": "speaker",
+    "cp": "F04C3"
+  },
+  "lock": {
+    "mdi": "lock",
+    "cp": "F033E"
+  },
+  "blinds": {
+    "mdi": "blinds",
+    "cp": "F00AC"
+  },
+  "home": {
+    "mdi": "home",
+    "cp": "F02DC"
+  },
+  "unknown": {
+    "mdi": "help-circle",
+    "cp": "F02D7"
+  }
+}

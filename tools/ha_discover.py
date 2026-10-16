@@ -56,6 +56,32 @@ SENSOR_CLASSES = {"temperature", "humidity"}
 RGB_MODES = {"hs", "rgb", "rgbw", "rgbww", "xy"}
 DIM_MODES = {"brightness", "color_temp"} | RGB_MODES
 
+# Icon names the firmware knows, in src/ui/panel_icons.h. These are the
+# panel's own names, not Material Design Icons' - they travel in the
+# layout JSON and have to outlive whichever icon set they were cut from.
+ICON_NAMES = [
+    "light", "ceiling", "lamp", "strip", "fan", "ac", "toggle", "plug",
+    "temp", "humidity", "tv", "speaker", "lock", "blinds", "home", "unknown",
+]
+
+# What an entity gets when nobody picks for it. Mirrors DOMAIN_ICONS in
+# src/layout_store.cpp - change one, change the other, or the designer
+# preview and the panel will disagree.
+DOMAIN_ICONS = {
+    "light": "light",
+    "fan": "fan",
+    "switch": "plug",
+    "input_boolean": "toggle",
+    "media_player": "tv",
+    "lock": "lock",
+    "cover": "blinds",
+}
+
+
+def default_icon(entity_id):
+    return DOMAIN_ICONS.get(entity_id.split(".", 1)[0], "unknown")
+
+
 MAX_AREAS = 6
 MAX_ENTITIES = 12
 MAX_AUTOMATIONS = 8
@@ -222,7 +248,7 @@ async def fetch_inventory(url, token):
 
 
 def select_layout(inv, include=None, favourite=(), automations=None,
-                  order=None, log=print):
+                  order=None, icons=None, log=print):
     """Turn a selection into the four tables a layout is made of.
 
     include     entity_ids to place, or None for everything controllable
@@ -233,9 +259,12 @@ def select_layout(inv, include=None, favourite=(), automations=None,
                 see grid_for() in ui/dashboard.cpp - so this is what the
                 authoring tool's drag-and-drop actually edits.
 
+    icons       entity_id -> icon name, overriding the domain default
+
     Returns (area_names, rows, acts, sensor_rows) where rows are
-    (eid, name, kind, area_index, favourite).
+    (eid, name, kind, area_index, favourite, icon).
     """
+    icons = icons or {}
     favourite = set(favourite)
     chosen = [r for r in inv.controllable if include is None or r[0] in include]
 
@@ -276,7 +305,8 @@ def select_layout(inv, include=None, favourite=(), automations=None,
             log(f"note: {inv.area_of(area)} page is full, skipping {eid}")
             continue
         per_area[idx] += 1
-        rows.append((eid, name, kind, idx, eid in favourite))
+        rows.append((eid, name, kind, idx, eid in favourite,
+                     icons.get(eid) or default_icon(eid)))
         if len(rows) >= MAX_ENTITIES:
             break
 
@@ -323,6 +353,9 @@ def build_header(area_names, rows, acts, sensor_rows):
            "// Regenerate after changing areas or entity selection in HA.",
            "",
            '#include "../src/panel_model.h"', "",
+           "// Entities carry an icon name; layout_store.cpp checks this.",
+           "#define HA_LAYOUT_HAS_ICONS 1",
+           "",
            f"#define HA_AREA_COUNT {len(area_names)}",
            "static const char *HA_AREAS[] = {"]
     for name in area_names:
@@ -334,12 +367,13 @@ def build_header(area_names, rows, acts, sensor_rows):
             "  EntityKind kind;",
             "  uint8_t area;",
             "  bool favourite;",
+            "  const char *icon;",
             "};", "",
             f"#define HA_ENTITY_COUNT {len(rows)}",
             "static const HaEntityCfg HA_ENTITIES[] = {"]
-    for eid, name, kind, area, fav in rows:
+    for eid, name, kind, area, fav, icon in rows:
         out.append(f"  {{ {c_str(eid)}, {c_str(name)}, EntityKind::{kind}, "
-                   f"{area}, {'true' if fav else 'false'} }},")
+                   f"{area}, {'true' if fav else 'false'}, {c_str(icon)} }},")
     out += ["};", "",
             "struct HaActionCfg {",
             "  const char *id;",
@@ -384,8 +418,9 @@ def build_layout(area_names, rows, acts, sensor_rows, theme=None):
         "v": LAYOUT_VERSION,
         "areas": list(area_names),
         "entities": [
-            {"id": eid, "name": name, "kind": kind, "area": area, "fav": fav}
-            for eid, name, kind, area, fav in rows
+            {"id": eid, "name": name, "kind": kind, "area": area,
+             "fav": fav, "icon": icon}
+            for eid, name, kind, area, fav, icon in rows
         ],
         "actions": [{"id": eid, "name": name} for eid, name in acts],
         "sensors": [

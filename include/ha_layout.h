@@ -5,6 +5,9 @@
 
 #include "../src/panel_model.h"
 
+// Entities carry an icon name; layout_store.cpp checks this.
+#define HA_LAYOUT_HAS_ICONS 1
+
 #define HA_AREA_COUNT 3
 static const char *HA_AREAS[] = {
   "Bedroom",
@@ -18,15 +21,16 @@ struct HaEntityCfg {
   EntityKind kind;
   uint8_t area;
   bool favourite;
+  const char *icon;
 };
 
 #define HA_ENTITY_COUNT 5
 static const HaEntityCfg HA_ENTITIES[] = {
-  { "switch.ac", "AC", EntityKind::Toggle, 0, false },
-  { "light.bed_light", "Bed Light", EntityKind::RGB, 0, true },
-  { "light.kitchen_lights", "Kitchen Lights", EntityKind::RGB, 1, false },
-  { "light.ceiling_lights", "Ceiling Lights", EntityKind::RGB, 2, true },
-  { "light.living_room_rgbww_lights", "Living Room RGBWW Lights", EntityKind::RGB, 2, true },
+  { "switch.ac", "AC", EntityKind::Toggle, 0, false, "plug" },
+  { "light.bed_light", "Bed Light", EntityKind::RGB, 0, true, "light" },
+  { "light.kitchen_lights", "Kitchen Lights", EntityKind::RGB, 1, false, "light" },
+  { "light.ceiling_lights", "Ceiling Lights", EntityKind::RGB, 2, true, "light" },
+  { "light.living_room_rgbww_lights", "Living Room RGBWW Lights", EntityKind::RGB, 2, true, "light" },
 };
 
 struct HaActionCfg {

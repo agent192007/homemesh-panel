@@ -584,6 +584,7 @@ void transport_start() {
     entities[i].kind = g_layout.ents[i].kind;
     entities[i].area = g_layout.ents[i].area;
     entities[i].favourite = g_layout.ents[i].favourite;
+    entities[i].icon = g_layout.ents[i].icon;
   }
   for (uint8_t i = 0; i < g_layout.act_n; i++)
     automations[i].name = g_layout.acts[i].name;

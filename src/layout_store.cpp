@@ -101,6 +101,34 @@ static void apply_theme(JsonObjectConst root) {
                        n, (unsigned)PANEL_THEME_FIELDS);
 }
 
+// Mirrors DOMAIN_ICONS in tools/ha_discover.py. Change one, change
+// the other, or the designer preview and the panel will disagree.
+//
+// Only reached when a layout names no icon - which means a layout
+// stored before icons existed. The tool always writes one now.
+struct DomainIcon { const char *domain; const char *icon; };
+
+static const DomainIcon DOMAIN_ICONS[] = {
+  { "light",         "light"  },
+  { "fan",           "fan"    },
+  { "switch",        "plug"   },
+  { "input_boolean", "toggle" },
+  { "media_player",  "tv"     },
+  { "lock",          "lock"   },
+  { "cover",         "blinds" },
+};
+
+static const char *icon_for_domain(const char *entity_id) {
+  if (!entity_id) return "unknown";
+  const char *dot = strchr(entity_id, '.');
+  size_t n = dot ? (size_t)(dot - entity_id) : strlen(entity_id);
+  for (auto &d : DOMAIN_ICONS) {
+    if (strlen(d.domain) == n && strncmp(d.domain, entity_id, n) == 0)
+      return d.icon;
+  }
+  return "unknown";
+}
+
 static EntityKind kind_from(const char *s) {
   if (!s) return EntityKind::Toggle;
   if (strcmp(s, "RGB") == 0) return EntityKind::RGB;
@@ -128,6 +156,13 @@ static void load_builtin() {
   for (uint8_t i = 0; i < HA_ENTITY_COUNT; i++) {
     g_layout.ents[i].id = HA_ENTITIES[i].id;
     g_layout.ents[i].name = HA_ENTITIES[i].name;
+#ifdef HA_LAYOUT_HAS_ICONS
+    g_layout.ents[i].icon = HA_ENTITIES[i].icon;
+#else
+    // Generated before icons existed. Points into flash via the
+    // domain table, so nothing is copied.
+    g_layout.ents[i].icon = icon_for_domain(HA_ENTITIES[i].id);
+#endif
     g_layout.ents[i].kind = HA_ENTITIES[i].kind;
     g_layout.ents[i].area = HA_ENTITIES[i].area;
     g_layout.ents[i].favourite = HA_ENTITIES[i].favourite;
@@ -207,7 +242,9 @@ static bool validate(JsonObjectConst root, char *err, size_t err_n) {
     int area = e["area"] | -1;
     if (area < 0 || area >= (int)areas.size())
       REJECT("entity %s has area %d, only %u areas", id, area, (unsigned)areas.size());
+    const char *icon = e["icon"];
     need += strlen(id) + strlen(name) + 2;
+    need += strlen(icon && *icon ? icon : "unknown") + 1;
     i++;
   }
 
@@ -260,7 +297,9 @@ static bool populate(JsonObjectConst root) {
     LayoutEntity &d = g_layout.ents[g_layout.ent_n];
     d.id = intern(e["id"]);
     d.name = intern(e["name"]);
-    if (!d.id || !d.name) return false;
+    const char *icon = e["icon"];
+    d.icon = intern(icon && *icon ? icon : icon_for_domain(e["id"]));
+    if (!d.id || !d.name || !d.icon) return false;
     d.kind = kind_from(e["kind"]);
     d.area = (uint8_t)(e["area"] | 0);
     d.favourite = e["fav"] | false;

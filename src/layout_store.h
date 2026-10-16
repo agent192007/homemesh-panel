@@ -31,6 +31,7 @@
 struct LayoutEntity {
   const char *id;      // entity_id, for subscribe_trigger / call_service
   const char *name;    // friendly name, for the tile
+  const char *icon;    // icon name ("light", "fan"), never a glyph
   EntityKind kind;
   uint8_t area;        // index into areas[]
   bool favourite;      // also appears on the Home page

@@ -44,6 +44,11 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 try:
+    import icon_masks
+except ImportError:          # preview still works, just without glyphs
+    icon_masks = None
+
+try:
     import ha_discover as hd
 except SystemExit:
     # ha_discover exits on a missing websockets; say so in GUI terms.
@@ -111,6 +116,12 @@ class Designer(tk.Tk):
         self.tables = None         # last computed (area_names, rows, acts, sensors)
         self.theme = dict(hd.THEME_DEFAULTS)
         self.swatches = {}         # theme key -> the swatch widget
+        self.icons = {}            # entity_id -> icon name, user override
+        self.icon_vars = {}        # entity_id -> that row's Combobox var
+        # (icon, px, fg, bg) -> PhotoImage. Also the only reference
+        # keeping them alive: tkinter does not own images a canvas
+        # draws, and an uncached one vanishes mid-render.
+        self._icon_cache = {}
         self.msgq = queue.Queue()  # worker thread -> UI
 
         self._build_chrome()
@@ -246,6 +257,58 @@ class Designer(tk.Tk):
         self.pick_canvas.yview_scroll(int(-event.delta / 120), "units")
 
     # -----------------------------------------------------------
+    #  Icons
+    # -----------------------------------------------------------
+    @staticmethod
+    def _rgb(h):
+        h = h.lstrip("#")
+        return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+    def _icon_photo(self, name, px, fg, bg):
+        """The glyph composited over the tile colour.
+
+        Composited rather than made transparent because tkinter's
+        PhotoImage has no per-pixel alpha worth using - and the tile
+        colour is known here anyway, so there is nothing to blend
+        against that we do not already have.
+        """
+        if icon_masks is None:
+            return None
+        key = (name, px, fg, bg)
+        hit = self._icon_cache.get(key)
+        if hit is not None:
+            return hit
+
+        data = icon_masks.mask(name, px)
+        if data is None:
+            data = icon_masks.mask("unknown", px)
+            if data is None:
+                return None
+
+        fr, fg_, fb = self._rgb(fg)
+        br, bg_, bb = self._rgb(bg)
+        rows = []
+        for y in range(px):
+            row = []
+            base = y * px
+            for x in range(px):
+                a = data[base + x]
+                if a == 0:
+                    row.append(bg)
+                else:
+                    t = a / 255.0
+                    row.append("#%02x%02x%02x" % (
+                        int(br + (fr - br) * t),
+                        int(bg_ + (fg_ - bg_) * t),
+                        int(bb + (fb - bb) * t)))
+            rows.append("{" + " ".join(row) + "}")
+
+        img = tk.PhotoImage(width=px, height=px)
+        img.put(" ".join(rows))
+        self._icon_cache[key] = img
+        return img
+
+    # -----------------------------------------------------------
     #  Theme
     # -----------------------------------------------------------
     def _pick_colour(self, key):
@@ -345,6 +408,7 @@ class Designer(tk.Tk):
         saved_inc = {e for e, v in self.include.items() if v.get()} or None
         saved_fav = {e for e, v in self.favourite.items() if v.get()}
         self.include, self.favourite = {}, {}
+        self.icon_vars = {}
 
         by_area = {}
         for eid, name, kind, area in self.inv.controllable:
@@ -387,14 +451,30 @@ class Designer(tk.Tk):
                                       command=self._on_pick_change,
                                       state="normal" if placeable else "disabled")
                 star.pack(side="left")
-                tk.Label(row, text=name, bg=UI_PANEL, width=24, anchor="w",
+                tk.Label(row, text=name, bg=UI_PANEL, width=19, anchor="w",
                          fg="#222" if placeable else "#AAA").pack(side="left")
-                tk.Label(row, text=kind, bg=UI_PANEL, width=9, anchor="w",
+                tk.Label(row, text=kind, bg=UI_PANEL, width=8, anchor="w",
                          fg=COL_ACCENT if kind != "Toggle" else "#888").pack(side="left")
-                tk.Label(row, text=eid, bg=UI_PANEL, fg="#999", width=20, anchor="w",
+
+                # Icon, defaulting to whatever the domain implies - the
+                # same default the firmware would reach on its own, so
+                # leaving it alone is not a worse answer than setting it.
+                iv = tk.StringVar(value=self.icons.get(eid) or hd.default_icon(eid))
+                self.icon_vars[eid] = iv
+                box = ttk.Combobox(row, textvariable=iv, values=hd.ICON_NAMES,
+                                   width=8, state="readonly" if placeable else "disabled")
+                box.pack(side="left", padx=(0, 4))
+                box.bind("<<ComboboxSelected>>",
+                         lambda _e, k=eid: self._on_icon_change(k))
+
+                tk.Label(row, text=eid, bg=UI_PANEL, fg="#999", width=15, anchor="w",
                          font=("Consolas", 8)).pack(side="left")
 
         self.pick_canvas.yview_moveto(0)
+
+    def _on_icon_change(self, eid):
+        self.icons[eid] = self.icon_vars[eid].get()
+        self._recompute()
 
     def _on_pick_change(self):
         # A newly ticked entity joins the end of its area's block; an
@@ -432,6 +512,7 @@ class Designer(tk.Tk):
                 self.inv,
                 include=sel,
                 favourite={e for e, v in self.favourite.items() if v.get()},
+                icons={e: v.get() for e, v in self.icon_vars.items()},
                 # None means "whatever HA has", matching the CLI with no
                 # --automations, so both authoring paths emit the same
                 # layout from the same selection.
@@ -530,7 +611,7 @@ class Designer(tk.Tk):
 
         rects = slot_rects(len(ents))
         for k, (ent, (x, y, w, h)) in enumerate(zip(ents, rects)):
-            eid, name, kind, area, fav = ent
+            eid, name, kind, area, fav, icon = ent
             tag = f"slot{k}"
             cv.create_rectangle(x * s, y * s, (x + w) * s, (y + h) * s,
                                 fill=t["tile"], outline=t["muted"], width=1,
@@ -544,6 +625,15 @@ class Designer(tk.Tk):
                 cv.create_text((x + w - 10) * s, (y + 12) * s, text="★",
                                anchor="e", fill=t["on"], font=("Segoe UI", 9),
                                tags=("tile", tag))
+            # Matches create_device_tile(): LEFT_MID, 28px on a roomy
+            # tile and 18px otherwise, in the accent colour.
+            roomy = h >= 80
+            px = (28 if roomy else 18) * s
+            photo = self._icon_photo(icon, px, t["accent"], t["tile"])
+            if photo is not None:
+                cv.create_image((x + 10) * s, (y + h / 2) * s + (2 * s if roomy else 0),
+                                image=photo, anchor="w", tags=("tile", tag))
+
             if kind != "Toggle":
                 # The mini brightness bar, gated on kind != Toggle in
                 # dashboard.cpp - the slider is the visible consequence
@@ -652,6 +742,9 @@ class Designer(tk.Tk):
 
         ents = saved.get("entities", [])
         self.order = [e["id"] for e in ents]
+        for e in ents:
+            if e.get("icon"):
+                self.icons[e["id"]] = e["icon"]
         for e in ents:
             self.include[e["id"]] = tk.BooleanVar(value=True)
             self.favourite[e["id"]] = tk.BooleanVar(value=bool(e.get("fav")))

@@ -71,6 +71,12 @@ struct EntityDesc {
   EntityKind kind;
   uint8_t area;      // index into the transport's area table
   bool favourite;    // also appears on the Home page
+  // Icon *name* ("light", "fan", "plug"), not a glyph - the UI owns
+  // the name-to-glyph mapping, the transport owns which name applies.
+  // Last on purpose: the other transports brace-initialise this struct
+  // without it, and a trailing member value-initialises to null.
+  // Null is valid and draws the unknown glyph.
+  const char *icon;
 };
 
 struct AutomationDesc {

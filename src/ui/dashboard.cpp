@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #include "../panel_theme.h"
+#include "panel_icons.h"
 #include "../transport.h"
 
 // ------------------------------------------------------------
@@ -454,6 +455,19 @@ static void create_device_tile(lv_obj_t *parent, uint8_t i,
   lv_obj_set_style_text_color(t, COL_TEXT, 0);
   lv_obj_set_style_text_color(t, lv_color_black(), LV_STATE_CHECKED);
   lv_obj_add_event_cb(t, toggle_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
+
+  // The device icon, in what used to be dead space in the middle of
+  // every tile. A font glyph, not an image: it draws like text out of
+  // flash and costs nothing from LVGL's 40KB pool, which is why icons
+  // are a font here rather than PNGs on the SD card.
+  lv_obj_t *ic = lv_label_create(t);
+  lv_label_set_text(ic, icon_glyph(d->icon));
+  lv_obj_set_style_text_font(ic, roomy ? &panel_icons_28 : &panel_icons_18, 0);
+  lv_obj_set_style_text_color(ic, COL_ACCENT, 0);
+  // Checked state flips the tile to COL_ON with black text; the icon
+  // follows so it does not stay accent-blue on an amber tile.
+  lv_obj_set_style_text_color(ic, lv_color_black(), LV_STATE_CHECKED);
+  lv_obj_align(ic, LV_ALIGN_LEFT_MID, 0, roomy ? 2 : 0);
 
   lv_obj_t *name = lv_label_create(t);
   lv_label_set_text(name, d->name);
