@@ -13,3 +13,6 @@ tools/.env
 # its runtime state (.storage holds the auth tokens, home-assistant_v2.db
 # is the recorder database) is never in scope here. ha/ holds only the
 # compose file that documents the instance.
+
+# Icon font build scratch (tools/make_icon_font.sh)
+tools/.iconfont/

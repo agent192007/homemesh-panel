@@ -43,4 +43,8 @@ LV_FONT_DECLARE(panel_icons_18);
 // Icon name from the layout -> glyph. Unknown names fall back to
 // ICON_UNKNOWN rather than drawing nothing, so a typo in a pushed
 // layout is visible on the panel instead of silently blank.
+//
+// Deriving an icon from an entity_id is NOT here - that lives in
+// layout_store.cpp, because it is about entity_ids. This file
+// only knows how to turn a name into something drawable.
 const char *icon_glyph(const char *name);
