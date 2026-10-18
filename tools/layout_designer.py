@@ -73,6 +73,14 @@ COL_TEXT = "#FFFFFF"
 COL_MUTED = "#8A9099"
 COL_OK = "#3DDC84"
 
+# Card shading from ui/dashboard.cpp, same names. CARD_EDGE is what
+# lv_color_lighten() takes: n/255 of white mixed in. Fills are flat -
+# see the note there on why the gradients went. CARD_LIFT is not
+# mirrored: the preview only ever draws tiles off, because it has no
+# live state to show.
+CARD_EDGE = 55
+CARD_RADIUS = 10
+
 # Chrome around the preview.
 UI_BG = "#F4F5F7"
 UI_PANEL = "#FFFFFF"
@@ -96,6 +104,32 @@ def slot_rects(n):
         y = HEADER_H + GAP + (k // 2) * (h + GAP)
         out.append((x, y, w, h))
     return out
+
+
+def _hex_rgb(h):
+    h = h.lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def _mix(a, b, lvl):
+    """lv_color_mix(): a at lvl/255 over b."""
+    return "#%02x%02x%02x" % tuple(
+        (x * lvl + y * (255 - lvl)) // 255
+        for x, y in zip(_hex_rgb(a), _hex_rgb(b)))
+
+
+def lighten(h, lvl):
+    """lv_color_lighten(): white mixed in at lvl/255."""
+    return _mix("#ffffff", h, lvl)
+
+
+def ramp_at(top, bot, y, h):
+    """Row y of an h-row LV_GRAD_DIR_VER ramp: bg_color at the top,
+    bg_grad_color at the bottom."""
+    t = y / (h - 1) if h > 1 else 0.0
+    t = max(0.0, min(1.0, t))
+    return "#%02x%02x%02x" % tuple(
+        round(a + (b - a) * t) for a, b in zip(_hex_rgb(top), _hex_rgb(bot)))
 
 
 class Designer(tk.Tk):
@@ -264,7 +298,7 @@ class Designer(tk.Tk):
         h = h.lstrip("#")
         return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
 
-    def _icon_photo(self, name, px, fg, bg):
+    def _icon_photo(self, name, px, fg, bg, bg2=None):
         """The glyph composited over the tile colour.
 
         Composited rather than made transparent because tkinter's
@@ -274,7 +308,7 @@ class Designer(tk.Tk):
         """
         if icon_masks is None:
             return None
-        key = (name, px, fg, bg)
+        key = (name, px, fg, bg, bg2)
         hit = self._icon_cache.get(key)
         if hit is not None:
             return hit
@@ -286,15 +320,19 @@ class Designer(tk.Tk):
                 return None
 
         fr, fg_, fb = self._rgb(fg)
-        br, bg_, bb = self._rgb(bg)
         rows = []
         for y in range(px):
+            # The tile behind the glyph is a gradient, so what it is
+            # composited over changes row by row. Compositing over one
+            # flat colour would draw every icon in a visible box.
+            row_bg = bg if bg2 is None else ramp_at(bg, bg2, y, px)
+            br, bg_, bb = self._rgb(row_bg)
             row = []
             base = y * px
             for x in range(px):
                 a = data[base + x]
                 if a == 0:
-                    row.append(bg)
+                    row.append(row_bg)
                 else:
                     t = a / 255.0
                     row.append("#%02x%02x%02x" % (
@@ -305,6 +343,37 @@ class Designer(tk.Tk):
 
         img = tk.PhotoImage(width=px, height=px)
         img.put(" ".join(rows))
+        self._icon_cache[key] = img
+        return img
+
+    def _ramp_photo(self, w, h, top, bot, radius=0):
+        """A card fill with rounded corners, as style_card() draws it.
+
+        Takes a top and a bottom colour because it can draw a vertical
+        ramp; the panel's fills are flat now, so callers pass the same
+        colour twice.
+
+        Built as a 1px column and zoomed sideways, so a full-width ramp
+        is h pixel writes rather than w*h. Corners are cut with
+        per-pixel transparency; on a tkinter too old to have that they
+        stay square, which is a cosmetic loss rather than a crash.
+        """
+        key = ("ramp", w, h, top, bot, radius)
+        hit = self._icon_cache.get(key)
+        if hit is not None:
+            return hit
+        col = tk.PhotoImage(width=1, height=h)
+        col.put(" ".join("{%s}" % ramp_at(top, bot, y, h) for y in range(h)))
+        img = col.zoom(w, 1)
+        if radius and hasattr(img, "transparency_set"):
+            r = radius
+            for dy in range(r):
+                for dx in range(r):
+                    # Outside the arc whose centre sits r in from the corner.
+                    if (r - dx - 0.5) ** 2 + (r - dy - 0.5) ** 2 > r * r:
+                        for px, py in ((dx, dy), (w - 1 - dx, dy),
+                                       (dx, h - 1 - dy), (w - 1 - dx, h - 1 - dy)):
+                            img.transparency_set(px, py, True)
         self._icon_cache[key] = img
         return img
 
@@ -613,37 +682,65 @@ class Designer(tk.Tk):
         for k, (ent, (x, y, w, h)) in enumerate(zip(ents, rects)):
             eid, name, kind, area, fav, icon = ent
             tag = f"slot{k}"
-            cv.create_rectangle(x * s, y * s, (x + w) * s, (y + h) * s,
-                                fill=t["tile"], outline=t["muted"], width=1,
-                                tags=("tile", tag))
+            # style_card(): a flat fill, rounded, with a 1px lit top
+            # edge along its straight part. Drawn as an image because a
+            # canvas rectangle cannot round its corners; top == bot
+            # makes _ramp_photo() a flat fill.
+            top = bot = t["tile"]
+            r = CARD_RADIUS * s
+            cv.create_image(x * s, y * s, anchor="nw", tags=("tile", tag),
+                            image=self._ramp_photo(w * s, h * s, top, bot, r))
+            cv.create_line(x * s + r, y * s + s / 2, (x + w) * s - r, y * s + s / 2,
+                           fill=lighten(t["tile"], CARD_EDGE), width=s,
+                           tags=("tile", tag))
             cv.create_text((x + 10) * s, (y + 14) * s, text=name, anchor="w",
                            fill=t["text"], font=("Segoe UI", 9), width=(w - 16) * s,
                            tags=("tile", tag))
-            cv.create_text((x + 10) * s, (y + h - 14) * s, text="Off", anchor="w",
+            cv.create_text((x + 10) * s, (y + h - 14) * s, text="OFF", anchor="w",
                            fill=t["muted"], font=("Segoe UI", 8), tags=("tile", tag))
             if fav:
                 cv.create_text((x + w - 10) * s, (y + 12) * s, text="★",
                                anchor="e", fill=t["on"], font=("Segoe UI", 9),
                                tags=("tile", tag))
             # Matches create_device_tile(): LEFT_MID, 28px on a roomy
-            # tile and 18px otherwise, in the accent colour.
+            # tile and 18px otherwise, in the accent colour, inside a
+            # label padded 5px (2px compact) to make room for the disc
+            # it gets when on.
             roomy = h >= 80
             px = (28 if roomy else 18) * s
-            photo = self._icon_photo(icon, px, t["accent"], t["tile"])
+            pad = 5 if roomy else 2
+            cy = (y + h / 2) * s + (2 * s if roomy else 0)
+            y0 = cy - px / 2 - y * s  # the glyph's first row, tile-relative
+            photo = self._icon_photo(icon, px, t["accent"],
+                                     ramp_at(top, bot, y0, h * s),
+                                     ramp_at(top, bot, y0 + px - 1, h * s))
             if photo is not None:
-                cv.create_image((x + 10) * s, (y + h / 2) * s + (2 * s if roomy else 0),
+                cv.create_image((x + 10 + pad) * s, cy,
                                 image=photo, anchor="w", tags=("tile", tag))
 
             if kind != "Toggle":
                 # The mini brightness bar, gated on kind != Toggle in
                 # dashboard.cpp - the slider is the visible consequence
-                # of classify() picking RGB or Dimmable.
-                by = (y + h - 7) * s
-                cv.create_rectangle((x + 10) * s, by - 3, (x + w - 10) * s, by + 3,
-                                    fill=t["muted"], outline="", tags=("tile", tag))
-                cv.create_rectangle((x + 10) * s, by - 3,
-                                    (x + 10) * s + ((w - 20) * s) * 0.6, by + 3,
-                                    fill=t["accent"], outline="", tags=("tile", tag))
+                # of classify() picking RGB or Dimmable. Placed as
+                # create_device_tile() places it: w-90 wide, bottom-right
+                # inside the button padding (13px sides, 8px top and
+                # bottom at this display size), lifted 6px. The default
+                # theme gives the track 20% opacity, so it reads as a
+                # shadow in the card. The fill is COL_MUTED because the
+                # preview only draws tiles off; on the panel it turns
+                # COL_ON with the rest of the tile. Ends are round, as
+                # the theme makes them. The 60% is illustrative - the
+                # designer has no live brightness.
+                bh = 6 * s
+                bx1 = (x + w - 13) * s
+                bx0 = bx1 - (w - 90) * s
+                by = (y + h - 8 - 6) * s - bh / 2
+                track = _mix(t["bg"], ramp_at(top, bot, by - y * s, h * s), 51)
+                cv.create_line(bx0 + bh / 2, by, bx1 - bh / 2, by, width=bh,
+                               capstyle="round", fill=track, tags=("tile", tag))
+                cv.create_line(bx0 + bh / 2, by,
+                               bx0 + bh / 2 + (bx1 - bx0 - bh) * 0.6, by, width=bh,
+                               capstyle="round", fill=t["muted"], tags=("tile", tag))
 
         self._bind_drag(cv, page, rects)
 

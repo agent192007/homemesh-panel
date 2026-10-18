@@ -43,6 +43,24 @@ static const lv_coord_t GAP = 8;
 #define COL_WARN    lv_color_hex(g_theme.warn)
 #define COL_BAD     lv_color_hex(g_theme.bad)
 
+// Card shading. Levels are what lv_color_lighten() takes: n/255 of
+// white mixed in, so they scale with whatever the theme says the tile
+// colour is rather than being colours of their own.
+// tools/layout_designer.py mirrors the ones its preview draws, by
+// name - change one, change both.
+//
+// Fills are flat on purpose. Cards and the page backdrop had vertical
+// gradients for a day (18 Oct) and on this panel they banded badly.
+// RGB565 has 32 levels of red and blue, so a subtle ramp on a dark
+// colour is three or four visible stripes - the page backdrop was
+// about three across 212 rows - and since green has 64 levels its
+// steps fall on different rows, so every stripe carries a faint tint.
+// LVGL can dither gradients (LV_DITHER_GRADIENT) if depth is ever
+// wanted back; the lit top edge does most of that job without it.
+static const lv_opa_t CARD_EDGE = 55;   // the 1px lit top edge
+static const lv_opa_t CARD_LIFT = 40;   // how far an ON tile lifts
+static const lv_coord_t CARD_RADIUS = 10;
+
 // One rendered tile. A favourite has two of these - one on Home, one
 // on its room page - so refreshes walk the list rather than indexing
 // by entity.
@@ -50,7 +68,8 @@ struct TileUI {
   uint8_t entity;
   lv_obj_t *tile;
   lv_obj_t *state;
-  lv_obj_t *bar;  // mini brightness bar, NULL for Toggle
+  lv_obj_t *bar;   // mini brightness bar, NULL for Toggle
+  lv_obj_t *icon;  // lit on LV_STATE_CHECKED; see refresh_entity
 };
 
 static TileUI tiles[MAX_TILES];
@@ -123,10 +142,14 @@ static void set_enabled(lv_obj_t *obj, bool en) {
 }
 
 static void style_card(lv_obj_t *o) {
-  lv_obj_set_style_radius(o, 8, 0);
+  lv_obj_set_style_radius(o, CARD_RADIUS, 0);
   lv_obj_set_style_shadow_width(o, 0, 0);
-  lv_obj_set_style_border_width(o, 0, 0);
   lv_obj_set_style_bg_color(o, COL_TILE, 0);
+  // A 1px lit top edge, which is what actually sells the raised look.
+  // A drop shadow would do it too and cost a blur pass per tile.
+  lv_obj_set_style_border_width(o, 1, 0);
+  lv_obj_set_style_border_color(o, lv_color_lighten(COL_TILE, CARD_EDGE), 0);
+  lv_obj_set_style_border_side(o, LV_BORDER_SIDE_TOP, 0);
   lv_obj_set_style_opa(o, LV_OPA_40, LV_STATE_DISABLED);
 }
 
@@ -280,13 +303,43 @@ static void gesture_cb(lv_event_t *e) {
 //  Refresh
 // ------------------------------------------------------------
 static void refresh_entity(uint8_t i) {
-  const char *state = !known[i] ? "--" : (power[i] ? "ON" : "OFF");
+  const EntityDesc *d = transport_entity(i);
+  bool on = known[i] && power[i];
+
+  // A dimmable that is on reads its level, "72%", instead of "ON".
+  // The amber reading and the lit icon already say it is on, and the
+  // number is what gets read. Not "ON 72%": at Montserrat 20 that is
+  // 84px, and the mini bar leaves the reading 64px on a roomy tile
+  // before the two collide. "100%" is 51px.
+  //
+  // Guarded on bright[i] because a light can report on before its
+  // brightness attribute arrives, and "0%" would be a lie.
+  char state[16];
+  if (!known[i]) snprintf(state, sizeof(state), "--");
+  else if (!power[i]) snprintf(state, sizeof(state), "OFF");
+  else if (has_extras(d) && bright[i])
+    snprintf(state, sizeof(state), "%d%%", pct_of(bright[i]));
+  else snprintf(state, sizeof(state), "ON");
 
   for (uint8_t t = 0; t < tile_n; t++) {
     if (tiles[t].entity != i) continue;
     lv_label_set_text(tiles[t].state, state);
-    if (known[i] && power[i]) lv_obj_add_state(tiles[t].tile, LV_STATE_CHECKED);
-    else lv_obj_clear_state(tiles[t].tile, LV_STATE_CHECKED);
+    // LVGL does not propagate states to children - lv_obj_add_state
+    // touches exactly one object - so every part that is styled for
+    // LV_STATE_CHECKED has to be told. Styling a child for CHECKED
+    // and setting the state only on the parent is dead code, which is
+    // what the icon was doing when it first landed.
+    if (on) {
+      lv_obj_add_state(tiles[t].tile, LV_STATE_CHECKED);
+      lv_obj_add_state(tiles[t].state, LV_STATE_CHECKED);
+      if (tiles[t].icon) lv_obj_add_state(tiles[t].icon, LV_STATE_CHECKED);
+      if (tiles[t].bar) lv_obj_add_state(tiles[t].bar, LV_STATE_CHECKED);
+    } else {
+      lv_obj_clear_state(tiles[t].tile, LV_STATE_CHECKED);
+      lv_obj_clear_state(tiles[t].state, LV_STATE_CHECKED);
+      if (tiles[t].icon) lv_obj_clear_state(tiles[t].icon, LV_STATE_CHECKED);
+      if (tiles[t].bar) lv_obj_clear_state(tiles[t].bar, LV_STATE_CHECKED);
+    }
     if (tiles[t].bar) lv_bar_set_value(tiles[t].bar, bright[i], LV_ANIM_OFF);
   }
 
@@ -451,9 +504,13 @@ static void create_device_tile(lv_obj_t *parent, uint8_t i,
   style_card(t);
   lv_obj_set_size(t, w, h);
   lv_obj_set_pos(t, x, y);
-  lv_obj_set_style_bg_color(t, COL_ON, LV_STATE_CHECKED);
+  // ON lifts the card instead of flooding it. Six amber tiles on one
+  // page read as noise; a raised card with a lit icon and an amber
+  // reading says the same thing and leaves the page legible. The
+  // detail panel still floods its single big button, where loud is
+  // the right answer.
+  lv_obj_set_style_bg_color(t, lv_color_lighten(COL_TILE, CARD_LIFT), LV_STATE_CHECKED);
   lv_obj_set_style_text_color(t, COL_TEXT, 0);
-  lv_obj_set_style_text_color(t, lv_color_black(), LV_STATE_CHECKED);
   lv_obj_add_event_cb(t, toggle_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
 
   // The device icon, in what used to be dead space in the middle of
@@ -464,9 +521,17 @@ static void create_device_tile(lv_obj_t *parent, uint8_t i,
   lv_label_set_text(ic, icon_glyph(d->icon));
   lv_obj_set_style_text_font(ic, roomy ? &panel_icons_28 : &panel_icons_18, 0);
   lv_obj_set_style_text_color(ic, COL_ACCENT, 0);
-  // Checked state flips the tile to COL_ON with black text; the icon
-  // follows so it does not stay accent-blue on an amber tile.
-  lv_obj_set_style_text_color(ic, lv_color_black(), LV_STATE_CHECKED);
+  // On, the glyph goes amber and sits in a tinted disc. Both are
+  // styles on the label itself - a separate circle object behind it
+  // would be 24 more objects out of the 40KB pool, one per tile.
+  // refresh_entity sets CHECKED on this label; LVGL will not.
+  lv_obj_set_style_text_color(ic, COL_ON, LV_STATE_CHECKED);
+  lv_obj_set_style_bg_color(ic, COL_ON, LV_STATE_CHECKED);
+  lv_obj_set_style_bg_opa(ic, LV_OPA_20, LV_STATE_CHECKED);
+  lv_obj_set_style_radius(ic, LV_RADIUS_CIRCLE, 0);
+  // Padded in every state, so the glyph does not shift when the disc
+  // appears - only the disc does.
+  lv_obj_set_style_pad_all(ic, roomy ? 5 : 2, 0);
   lv_obj_align(ic, LV_ALIGN_LEFT_MID, 0, roomy ? 2 : 0);
 
   lv_obj_t *name = lv_label_create(t);
@@ -478,6 +543,8 @@ static void create_device_tile(lv_obj_t *parent, uint8_t i,
   lv_obj_t *st = lv_label_create(t);
   lv_obj_set_style_text_font(st, roomy ? &lv_font_montserrat_20
                                        : &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(st, COL_MUTED, 0);
+  lv_obj_set_style_text_color(st, COL_ON, LV_STATE_CHECKED);
   lv_obj_align(st, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 
   lv_obj_t *bar = NULL;
@@ -504,7 +571,13 @@ static void create_device_tile(lv_obj_t *parent, uint8_t i,
     lv_obj_set_size(bar, w - 90, 6);
     lv_obj_align(bar, LV_ALIGN_BOTTOM_RIGHT, 0, -6);
     lv_obj_set_style_bg_color(bar, COL_BG, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(bar, COL_TEXT, LV_PART_INDICATOR);
+    // The fill follows state like the icon and the reading: amber on,
+    // muted off. HA reports brightness as null for an off light, so
+    // bright[] keeps the last level - worth showing, because that is
+    // the level it comes back at, but in white it was the brightest
+    // thing on an off tile and read as "on".
+    lv_obj_set_style_bg_color(bar, COL_MUTED, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(bar, COL_ON, LV_PART_INDICATOR | LV_STATE_CHECKED);
     lv_obj_clear_flag(bar, LV_OBJ_FLAG_CLICKABLE);
   }
 
@@ -512,6 +585,7 @@ static void create_device_tile(lv_obj_t *parent, uint8_t i,
   tiles[tile_n].tile = t;
   tiles[tile_n].state = st;
   tiles[tile_n].bar = bar;
+  tiles[tile_n].icon = ic;
   tile_n++;
 }
 
