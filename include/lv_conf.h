@@ -17,9 +17,33 @@
 #define LV_COLOR_DEPTH 16
 #define LV_COLOR_16_SWAP 0
 
-/* Memory: no PSRAM on this board, keep LVGL's heap modest. */
+/* Memory: no PSRAM on this board, keep LVGL's heap modest.
+ * Drawing takes temporary buffers from this pool (radius masks, and a
+ * map per gradient if any come back), so the peak is higher than what
+ * the built widgets alone use. main.cpp logs the real peak (max_used)
+ * - size this from that.
+ *
+ * It cannot simply grow: env:ha's static DRAM is within ~1.5KB of the
+ * linker's limit (dram0_0_seg), and 48KB here fails to link there.
+ * If the peak says more is needed, take the pool from the heap at
+ * boot (LV_MEM_POOL_ALLOC) instead of from .bss. */
 #define LV_MEM_CUSTOM 0
 #define LV_MEM_SIZE (40U * 1024U)
+
+/* A failed LVGL assert - most often an allocation from the pool above
+ * - used to run LVGL's default handler, while(1). That freezes the
+ * screen mid-redraw, half the new page drawn over the old one, with
+ * nothing on serial: the network task on the other core keeps logging
+ * as if all were well. lv_assert_hit() in main.cpp names the LVGL file
+ * and line, reports the pool, and restarts. */
+#ifdef __cplusplus
+extern "C" {
+#endif
+void lv_assert_hit(const char *file, int line);
+#ifdef __cplusplus
+}
+#endif
+#define LV_ASSERT_HANDLER lv_assert_hit(__FILE__, __LINE__);
 
 /* Tick: taken from millis(), so no lv_tick_inc() timer is needed. */
 #define LV_TICK_CUSTOM 1
