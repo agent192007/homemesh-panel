@@ -12,39 +12,45 @@ demo over elegance — and at this point, prioritise the report over new
 capability, because the engineering is essentially where this file says
 it should be and the report is not.
 
-## Pick up here (17 Oct)
+## Pick up here (18 Oct)
 
-Five days. Current work is **UI appearance** — the functional
-architecture is done, and the panel looking plain is now the weakest
-part of the demo. In order:
+Four days. **The firmware is done — freeze it.** Everything left
+except the report is small, and the report is what gets graded. In
+order:
 
-1. **Icons per entity** (in progress, 17 Oct). Device-type glyphs in
-   the empty centre of each tile. See "What is left" item 1c.
-2. **Tile polish** — gradient background, use of the dead space,
-   on-state weight. Cheap, and it is most of the perceived difference.
-3. **Prove a layout push on the board.** Still the only part of the
-   architecture never confirmed on hardware. HA's side is verified.
-   Flash `env:ha`, push from the designer, and look for
-   `[layout] push received` then `[layout] loaded from NVS`.
-4. **Update the report material.** `docs/` describes a version of this
-   project that no longer exists. See item 4. Do this *after* the UI
-   work so the screenshots are of the final thing.
+1. **Add a Band Selection check to `tools/preflight.ps1`.** The demo
+   depends on the laptop's WiFi card being pinned to "2.4G Only" (see
+   Deployment network), and a driver update can quietly reset it to
+   Dual Band. Not written yet.
+2. **Update the report material.** `docs/` describes a version of this
+   project that no longer exists — see "What is left" item 4. The
+   title page needs team members, register numbers, faculty guide and
+   submission date from the user; leave them blank until given.
+3. Optional, offered 18 Oct, not started: **screenshots straight from
+   the panel.** Stream the LVGL frame buffer over serial from the flush
+   callback and rebuild a PNG on the laptop (~15 s per capture at
+   115200). Pixel-exact true RGB565, which the designer preview cannot
+   show, and far better report figures than phone photos of a 3.2"
+   screen. About 45 minutes.
+4. Optional: the microSD triage (`pio run -e sdscan -t upload -t
+   monitor`) — five minutes, still never run. Do it before the card
+   appears in any diagram.
+5. Decide whether to keep `src/access_point.cpp` — item 5 below.
 
-Wanted but not yet started, and first to cut: **multi-column tiles**
-(a 2-wide widget with its controls inline rather than behind the
-chevron). This is format surgery — `span` in the layout, real
-placement instead of `grid_for()`'s arithmetic, and the designer's
-preview and drag both have to understand it. A day and a half done
-properly, most of it in the designer.
+Done 18 Oct: the tile look (1d), state over `subscribe_entities`
+instead of REST (1e), the network root cause (Deployment network), and
+LVGL failures that name themselves (Known traps). The layout push was
+proven on hardware on 17 Oct.
 
-Also wanted, and argued down: a **background image**. 320x240 RGB565
-is 150 KB and tiles cover most of it. A gradient gets most of the
-effect for no bytes.
+Cut: **multi-column tiles** (a 2-wide widget with its controls inline).
+Format surgery — `span` in the layout, real placement instead of
+`grid_for()`'s arithmetic, and the designer's preview and drag both
+have to learn it. A day and a half, four days out, with the report
+undone. A **background image** was argued down earlier (320x240 RGB565
+is 150 KB and tiles cover most of it), and the gradient that stood in
+for it was itself removed — see 1d.
 
 Not worth starting before the deadline: retiring MQTT, microSD work.
-The microSD triage (`pio run -e sdscan -t upload -t monitor`) is still
-five minutes and still never run — do it before the card appears in
-any diagram.
 
 ## Where the project is going
 
@@ -69,7 +75,7 @@ work is split:
 
 - **The PC** does discovery. It calls `get_states`, shows the entity
   picker, and writes a layout naming 4-8 specific `entity_id`s.
-- **The ESP32** never calls `get_states`. It does `subscribe_trigger`
+- **The ESP32** never calls `get_states`. It does `subscribe_entities`
   on exactly the entities in its layout, and `call_service` to control
   them. Every message it handles is small and bounded.
 
@@ -78,16 +84,23 @@ that has no solution on this hardware.
 
 ### Firmware WebSocket surface
 
-The whole protocol the panel needs is four messages:
+The whole protocol the panel needs, all on one socket:
 
 ```
 connect ws://<ha-host>:8123/api/websocket   -> {"type":"auth_required"}
 {"type":"auth","access_token":"..."}         -> {"type":"auth_ok"}
-{"id":1,"type":"subscribe_trigger",
- "trigger":{"platform":"state","entity_id":[...]}}  -> state events
-{"id":2,"type":"call_service","domain":"light","service":"turn_on",
+{"id":1,"type":"subscribe_entities","entity_ids":[...]}
+    -> {"event":{"a":{...}}}   a snapshot of every entity, once
+    -> {"event":{"c":{...}}}   then only what changes
+{"id":2,"type":"subscribe_events","event_type":"homemesh_layout"}
+    -> layout pushes from the desktop tool
+{"id":N,"type":"call_service","domain":"light","service":"turn_on",
  "target":{"entity_id":"light.x"},"service_data":{"brightness":180}}
 ```
+
+`subscribe_entities` replaced `subscribe_trigger` plus one REST GET per
+entity on 18 Oct — see "What is left" 1e for why. The panel opens
+exactly one TCP connection to HA and nothing else.
 
 Availability is handled by WebSocket disconnect detection; there is no
 LWT equivalent.
@@ -97,9 +110,9 @@ LWT equivalent.
 Desktop tool: entity picker from `get_states` -> drag-and-drop 320x240
 canvas -> layout JSON -> pushed to the panel -> stored in NVS ->
 LVGL widgets built dynamically at boot. Firmware stays fixed; layout is
-data. All of this is now written (`tools/layout_designer.py` and
-`src/layout_store.*`, 15 Oct) but not yet proven on hardware — see
-"What is left". **Do not plan a reflash step** — that would require esptool, a
+data. All of this is written (`tools/layout_designer.py` and
+`src/layout_store.*`, 15 Oct) and proven on hardware (17 Oct).
+**Do not plan a reflash step** — that would require esptool, a
 toolchain and CH340 drivers on the user's machine, and breaks the
 "runs on any PC" goal.
 
@@ -182,9 +195,28 @@ The hotspot makes the demo independent of the venue.
 - **Host IP is fixed at `192.168.137.1`.** Windows Mobile Hotspot runs
   on ICS, which always takes that address. More predictable than a
   router DHCP lease — hardcode it.
-- **Hotspot band must be 2.4 GHz.** ESP32-WROOM-32 is 2.4 GHz only.
-  Windows 11 often defaults to 5 GHz, and the ESP32 then never sees the
-  SSID. Looks exactly like broken firmware.
+- **Hotspot band must be 2.4 GHz — and on this laptop the hotspot's
+  own setting is not enough.** ESP32-WROOM-32 is 2.4 GHz only. The
+  laptop's card (MediaTek MT7921) has a single radio, so Mobile Hotspot
+  shares a channel with the laptop's own WiFi link: when that link sits
+  on 5 GHz the hotspot goes with it, whatever its band setting says,
+  and the panel cannot see the network at all — it logs
+  `[wifi] not connected: reason 201 (NO_AP_FOUND)`. The router moves
+  the laptop between bands as it pleases, so for days this looked like
+  random "no link" and flaky firmware (found 18 Oct). **Fix, applied
+  18 Oct:** Device Manager → Network adapters → MediaTek Wi-Fi 6 MT7921
+  → Advanced → **Band Selection → 2.4G Only**, or from an admin
+  PowerShell:
+  `Set-NetAdapterAdvancedProperty -Name "WiFi" -DisplayName "Band Selection" -DisplayValue "2. 2.4G Only"`.
+  Then turn the hotspot off and on. A driver update can reset it —
+  hence item 1 of "Pick up here". For diagnosing: `netsh wlan` will not
+  report band or channel unless Windows Location services is on, but
+  the adapter's link speed is a tell (866.7 Mbps means 5 GHz).
+- **Mobile Hotspot will not start without a network to share.** If the
+  venue's WiFi is unusable, set the phone's hotspot to 2.4 GHz, join
+  the laptop to it, and turn the laptop's hotspot on as usual. (The
+  ESP32 access point in "What is left" 5 removes this dependency, but
+  has never been run.)
 - **WPA2, not WPA3.** WPA3-SAE on WROOM-32 with the Arduino core is
   unreliable.
 - **Inbound firewall access to TCP 8123 is required — but a hand-made
@@ -222,12 +254,12 @@ alternative is a trap:
 `tools/ha_discover.py` and `tools/layout_designer.py` therefore run on
 the laptop against `http://localhost:8123`.
 
-### Current infrastructure state (16 Oct)
+### Current infrastructure state (18 Oct)
 
-Home Assistant exists and the panel drives it. Verified end to end on
-17 Sep: hotspot, auth, `subscribe_trigger`, `call_service`, flashed and
-working on the board. Still true on 16 Oct, now with the entity table
-**and the colours** loaded at runtime instead of compiled in.
+Home Assistant exists and the panel drives it. First verified end to
+end on 17 Sep; as of 18 Oct the whole path is hotspot, auth,
+`subscribe_entities`, `subscribe_events` and `call_service`, with the
+entity table **and the colours** loaded at runtime from NVS.
 
 - **HA runs in Docker on the laptop.** Config lives at
   `C:\homeassistant`, outside the repo — its `.storage` holds the auth
@@ -261,15 +293,17 @@ Added since, on 15-16 Oct:
 - **`tools/layout_designer.py`** — the desktop authoring application.
 - **Layout and theme load from NVS at boot**, falling back to the
   compiled `ha_layout.h` and `panel_theme.cpp`. See "What is left".
-- **The push itself is not yet confirmed on hardware.** HA's half is
-  verified; the panel's half has never completed a push end to end.
-  Do not describe it as working until it has.
+- **A push is proven on hardware** (17 Oct): the board came back up
+  with `[layout] loaded from NVS: 5 entities, 3 areas, 2 sensors
+  (275/2560 arena)`.
 - The layout on the board is whatever was last pushed. `env:ha` logs
   which source it booted from — read that rather than assuming.
 
-**Largest WebSocket frame observed: 1608 bytes** — the PC/ESP32 split
-doing its job, against the hundreds of KB a `get_states` would cost.
-A layout push frame is ~890 bytes, comfortably inside the same budget.
+**The largest frame is now the `subscribe_entities` snapshot: 2536
+bytes for 7 entities** (18 Oct) — still the PC/ESP32 split doing its
+job, against the hundreds of KB a `get_states` would cost. A layout
+push frame is ~890 bytes. The WebSockets library drops any frame over
+15 KB; see "What is left" 1e.
 
 ## Toolchain
 
@@ -281,8 +315,12 @@ A layout push frame is ~890 bytes, comfortably inside the same budget.
 - **LVGL pinned to 8.3.x.** 9.x changed the display and input driver
   API. Most CYD example code online is 8.3. Do not upgrade.
 - TFT_eSPI 2.5.x
-- `links2004/arduinoWebSockets` + ArduinoJson — for the HA client
+- `links2004/arduinoWebSockets` + ArduinoJson — for the HA client.
+  `HTTPClient` is no longer used (18 Oct).
 - PubSubClient — legacy, removable once the WebSocket path lands
+- `pio` is not on PATH in this machine's shells. It lives at
+  `%USERPROFILE%\.platformio\penv\Scripts\pio.exe`, and the Python
+  beside it has pyserial, for reading the panel's log from a script.
 
 ## Architecture rules
 
@@ -296,8 +334,11 @@ src/
   main.cpp            entry, LVGL tick + timer handler
   display_driver.*    TFT_eSPI init + LVGL flush callback
   touch_driver.*      GT911 + LVGL indev read callback
-  ha_client.*         HA WebSocket: auth, subscribe_trigger, call_service
+  ha_client.*         HA WebSocket: auth, subscribe_entities, call_service
+  layout_store.*      the entity table: NVS layout, ha_layout.h fallback
+  panel_theme.*       g_theme, the nine colours
   mqtt_client.*       legacy MQTT transport, being retired
+  access_point.cpp    env:ap only - a second ESP32 as the demo network
   ui/                 LVGL screens and widgets
 ```
 
@@ -323,16 +364,49 @@ it** — `ha_client.*` presents the same three-function interface as
   a day: GCC inlined the function into `handle_text`, so the 4 KB was
   reserved on *every* frame, and it panicked inside an unrelated
   `Serial.printf` during startup with no layout in sight. Big
-  documents live at file scope — see `layout_doc` in `ha_client.cpp`
-  and `parse_doc` in `layout_store.cpp`. The panel logs its stack
-  high-water mark after auth; watch that number rather than waiting
-  for the canary.
+  documents live at file scope — see `big_doc` and `text_buf` in
+  `ha_client.cpp` and `parse_doc` in `layout_store.cpp`. The panel
+  logs its stack high-water mark after auth (8272 bytes free on
+  18 Oct); watch that number rather than waiting for the canary.
 - **Touch coordinates need rotating** to match `tft.setRotation()`.
   Taps landing mirrored or on the wrong axis is a rotation mismatch,
   not a broken touch driver.
-- **`LV_MEM_SIZE` is a fixed 40 KB pool.** Dynamically built widgets
-  come out of it. LVGL OOM presents as a hang or blank screen, not a
-  clean error.
+- **`LV_MEM_SIZE` is a fixed 40 KB pool, and it cannot simply grow.**
+  Built widgets come out of it, and so do the temporary buffers drawing
+  takes. A failed allocation used to be a silent freeze — LVGL's
+  default assert handler is `while(1)` — and since 18 Oct
+  `lv_assert_hit()` in `main.cpp` prints `[lvgl] ASSERT FAILED at
+  <file>:<line>` with the pool's state, then restarts. The panel logs
+  its headroom at boot (`[mem] UI built: ...`): ~15 KB free, largest
+  block ~15 KB, with a 5-entity layout. `max_used` counts requested
+  bytes only, without block headers, so read the free figures. To grow
+  the pool, allocate it from the heap (`LV_MEM_POOL_ALLOC`), not
+  `.bss` — see the next trap.
+- **`env:ha` has ~1.5 KB of static RAM to spare.** The linker's
+  `dram0_0_seg` is the real limit, not the 320 KB PlatformIO reports —
+  it said 37.5% used while ~1.5 KB short of overflow. A 48 KB LVGL pool
+  failed to link on 18 Oct, and so did a single new 2 KB static buffer,
+  which is why `ha_client.cpp` has one shared `text_buf`. Any new
+  static buffer in `env:ha` has to be paid for. The heap has ~160 KB
+  free; more room comes from there.
+- **LVGL states do not reach children.** `lv_obj_add_state()` changes
+  one object; a child styled for `LV_STATE_CHECKED` never sees it
+  unless the state is set on the child too. The icon shipped with dead
+  CHECKED styling for exactly this reason. `refresh_entity()` now sets
+  it on the tile, icon, reading and bar explicitly.
+- **Gradients band on this panel.** RGB565 has 32 levels of red and
+  blue, so a subtle ramp on a dark colour is a few visible stripes,
+  each faintly tinted because green steps on different rows. The
+  designer preview draws 24-bit colour and cannot show it. Keep fills
+  flat, or turn on `LV_DITHER_GRADIENT`.
+- **WiFi failures are logged with the driver's reason code** —
+  `[wifi] not connected: reason N (NAME)`. 201 / NO_AP_FOUND means the
+  panel cannot see the SSID at all; on this laptop that is almost
+  certainly the hotspot on 5 GHz (see Deployment network).
+- **"Ghost" tiles were the link dropping, not memory.** Tiles fade to
+  40% opacity while the link is down; with the reconnect loop they
+  cycled, and lingered between pages. Gone once the link was stable
+  (18 Oct). The pool had ~15 KB to spare throughout.
 - Charge-only USB-C cables power the board and backlight but never
   enumerate. If there is no COM port, suspect the cable first.
 - **PubSubClient buffer defaults to 256 bytes** (legacy path only). HA
@@ -404,28 +478,22 @@ flags; rotation is handled in `touch_driver.cpp`.
 
 Cut list, in order, if behind schedule: drag-and-drop authoring (fall
 back to a checkbox picker and a fixed 2x2 grid), brightness sliders,
-second screen, animations. **Nothing has been cut as of 16 Oct** — the
+second screen, animations. **Nothing has been cut as of 18 Oct** — the
 first item on that list shipped instead. If something has to give in
 the last days, give up the microSD work and retiring MQTT, not
 anything on this list.
 
 ## What is left
 
-Accurate as of 16 Oct. Ordered by what unblocks the most.
+Accurate as of 18 Oct. Ordered by what unblocks the most.
 
-### 1. Layout as data, not a header — flashed, push unconfirmed
+### 1. Layout as data, not a header — done, proven on hardware 17 Oct
 
-Every environment builds, and the board **boots on it** (16 Oct): it
-reads NVS, finds nothing stored, falls back to the compiled
-`ha_layout.h`, and runs. That fallback path is confirmed.
-
-**What is not confirmed is a push completing.** No layout has ever
-reached the board end to end. HA's half is verified — `subscribe_events`
-succeeds, `fire_event` returns success, the event reaches a subscriber
-as an ~890-byte frame — but the panel went offline before the fix for
-the silent-drop bug below could be flashed. Until someone sees
-`[layout] push received` followed by `[layout] loaded from NVS`, say
-so plainly rather than implying it works.
+Both paths are confirmed on the board. With nothing stored it falls
+back to the compiled `ha_layout.h` (16 Oct). A push from the designer
+arrived, validated, was stored, and the board came back up with
+`[layout] loaded from NVS: 5 entities, 3 areas, 2 sensors (275/2560
+arena)` (17 Oct).
 
 How it works, so it is not re-derived:
 
@@ -457,27 +525,24 @@ How it works, so it is not re-derived:
   fragments, and OOM there is a hang, not a clean error. A reboot is a
   few seconds and is deterministic. This is a choice, not a shortcut.
 - Strings live in a fixed **2560-byte arena**, not the heap, so a
-  layout cannot grow into territory LVGL needs. The demo layout uses
-  403 bytes; a maxed-out layout would use 2320. Over that it is
-  rejected whole, with a reason.
+  layout cannot grow into territory LVGL needs. A 5-entity layout used
+  275 bytes on 18 Oct; a maxed-out layout would use 2320. Over that it
+  is rejected whole, with a reason.
 - Validation runs **before** anything is stored and never touches the
   live table, so a rejected push leaves the panel running on the
   layout it has. Every rejection names its cause on serial — a push
   that silently does nothing is the worst version of this feature.
 
-The trap this had to work around, which is load-bearing: `handle_text`
-parses every frame through a filter into a **768-byte** document, and
-that is what keeps the hot path bounded. A 1002-byte layout does not
-fit it. So a layout push gets its own wider parse on its own path,
-paid only when a push arrives — **do not widen the shared filter to
-make the layout fit it.**
+The trap this had to work around, which is load-bearing: control
+messages (auth, command results) go through a small filter into a
+fixed **768-byte** document, and that is what keeps the hot path
+bounded. A 1002-byte layout does not fit it, and neither does the
+~2.5 KB state snapshot. So both are recognised from the raw frame and
+parsed on their own paths into the shared `big_doc`, paid only when
+one arrives — **do not widen the shared filter to make either fit.**
 
 `layout_store.cpp` is excluded from `env:panel` and `env:demo`: it
 needs ArduinoJson, which those paths do not carry.
-
-Still true until it is proven on hardware: `ha_layout.h` is the
-mechanism that is known to work, and reflashing is the update path
-that is known to work.
 
 ### 1b. Colours as data — done 16 Oct
 
@@ -498,6 +563,86 @@ all nine. Worth knowing:
   agree.
 - The tool sends only colours that differ, so an unstyled layout has
   no `theme` key at all.
+
+### 1c. Icons per entity — done 17 Oct
+
+A device-type glyph in what was dead space in the middle of each tile.
+16 Material Design Icons glyphs (light, ceiling, lamp, strip, fan, ac,
+toggle, plug, temp, humidity, tv, speaker, lock, blinds, home, unknown)
+compiled into **LVGL fonts** at 28 px and 18 px,
+`src/ui/fonts/panel_icons_*.c`. A glyph draws like text straight from
+flash, so the icons cost ~7.6 KB of flash and nothing from the 40 KB
+pool; decoded images would have come out of it.
+
+- The icon is layout data. Each entity carries an icon *name*, picked
+  in the designer (defaulting from the domain) and pushed like
+  everything else. `icon_glyph(name)` in `ui/panel_icons.cpp` maps a
+  name to a glyph; which name applies is decided in `layout_store.cpp`.
+- `EntityDesc.icon` is the struct's **last** member on purpose, so the
+  MQTT and fake transports' brace-initialisers still compile.
+- To change *which* icons exist: `bash tools/make_icon_font.sh` (needs
+  node and Pillow, build-time only). It regenerates the fonts, the name
+  table and the designer's preview masks, reproducibly. Changing which
+  icon an entity uses needs none of that — pick it and push.
+
+### 1d. Tile look — done 18 Oct
+
+The answer to "the UI looks plain". In `ui/dashboard.cpp`:
+
+- Cards have a 10 px radius and a 1 px lit top edge (`CARD_EDGE`) on a
+  **flat** fill. They had vertical gradients for a day, which banded
+  badly on the RGB565 panel (see Known traps) — removed, with a test
+  that fails if one comes back.
+- **ON lifts the card instead of flooding it amber.** The tile goes a
+  shade lighter (`CARD_LIFT`), the icon turns amber in a tinted disc,
+  and the reading and brightness bar turn amber. Six solid amber tiles
+  on one page was noise. The detail panel's single big button still
+  floods, where loud is right.
+- A lit dimmable reads its level, `72%`, not `ON`. Not `ON 72%`: at
+  Montserrat 20 that is 84 px, and the bar leaves the reading 64 px on
+  a roomy tile. `100%` is 51 px.
+- HA reports brightness as null for an off light, so the bar keeps the
+  last level — the level it comes back at — drawn muted. In white it
+  read as "on".
+- The designer's preview mirrors `CARD_EDGE` and `CARD_RADIUS` by name,
+  and the contract test checks they agree.
+- Not yet seen on hardware: the 60 px compact tiles a 5-6 tile page
+  uses. Every page of the current layout has 3 tiles or fewer.
+
+### 1e. State over the WebSocket — done 18 Oct
+
+The panel used to fetch initial state with one REST GET per entity,
+made from **inside the WebSocket callback**. Over the hotspot those
+GETs timed out (`-11`, `-1`), and while they blocked — up to 21 s —
+the heartbeat could not run, so the library dropped the socket,
+reconnected and did it all again: the "no link" loop, with every tile
+reading `--`. The timeouts themselves turned out to be the hotspot
+moving to 5 GHz (see Deployment network), but blocking in the callback
+is what turned each flaky GET into a dead connection.
+
+Now one `subscribe_entities` replaces `subscribe_trigger` and the GETs.
+HA sends a snapshot of every subscribed entity, then only what changes,
+on the socket the panel already holds. `HTTPClient` is gone (34 KB of
+flash). All of this was measured against the real HA (2026.9) before
+the firmware was written:
+
+- Snapshot: `{"event":{"a":{"light.x":{"s":"on","a":{...}}}}}`, 2536
+  bytes for 7 entities. Change:
+  `{"event":{"c":{"light.x":{"+":{"s":"off","a":{...}}}}}}`.
+- **A change can arrive with no `"s"`** — brightness moving while the
+  light stays on. `apply_entity_state()` treats state as optional.
+- Frames are routed on the raw bytes (`"event":{"a":` and
+  `"event":{"c":`) to `handle_entities_event()`, and parsed with
+  ArduinoJson's `"*"` wildcard filter into `big_doc`. A check of the
+  firmware's own routing strings against every frame type HA sends
+  passed 11 of 11.
+- The subscription is built in `text_buf` and prints
+  `SUBSCRIPTION TRUNCATED` rather than silently dropping ids, as the
+  old 1 KB stack buffer did.
+- **Ceiling:** the WebSockets library drops any frame over 15 KB and
+  closes the connection. A 12-entity layout with demo-sized attributes
+  is ~5 KB, but an entity with an enormous attribute (a WLED light with
+  a hundred effects) could push a snapshot over.
 
 ### 2. Desktop tool GUI — done 15 Oct
 
@@ -526,6 +671,11 @@ Two deliberate limits, both forced by the firmware rather than by time:
 
 Was first on the cut list; nothing was cut to get it.
 
+The preview is a tkinter redraw of the panel, **not LVGL**: same
+geometry and colours, but Windows fonts drawn smaller, 24-bit colour
+(so it cannot show banding), and every tile drawn off. Judge looks on
+the board.
+
 ### 3. Retire MQTT
 
 Now genuinely unblocked: the `demo` integration and the `input_boolean`
@@ -542,7 +692,7 @@ Cleanup rather than new capability, but it shrinks what can break.
 
 ### 4. Report and demo material — the real gap now
 
-**This is the thing being graded on the 20th, and it is the least
+**This is the thing being graded on the 22nd, and it is the least
 current part of the project.** `docs/` was written on 17 Sep and
 describes a version of this project that no longer exists.
 
@@ -566,12 +716,39 @@ What is stale in all of them:
   criticised for being.
 - No mention of **theming**.
 - No mention of the **microSD card**, which is physically on the board.
+- Nothing on the **icons**, the **tile look**, or the move to
+  **`subscribe_entities`** (1c-1e).
 - The title page still has blanks: team members, register numbers,
   faculty guide, submission date.
+
+Worth a section of its own: the **18 Oct network diagnosis**. A fault
+that looked like random firmware flakiness — timeouts, reconnect
+loops, "ghost" tiles — traced through the panel's own logs to the
+laptop's single-radio card pulling the hotspot onto 5 GHz, plus a
+firmware design flaw (blocking in the callback) that amplified it.
+Good evidence of debugging method, with the logs to show it.
 
 The three diagrams are regenerated by editing
 `docs/figures/generate_diagrams.py` and rerunning it — do not hand-edit
 the PNGs. It needs Pillow.
+
+### 5. ESP32 access point — written 18 Oct, never run
+
+`src/access_point.cpp`, built as `env:ap`: a second ESP32 as the demo's
+own 2.4 GHz network, so the demo stops depending on the hotspot having
+a network to share or on the venue's channel. Built as a **drop-in**:
+the same SSID and password (read from the panel's own `secrets.h`), the
+same `192.168.137.0/24` with the AP at `.254` and DHCP from `.100` to
+`.110`, and the laptop takes `192.168.137.1` by hand — so the panel
+needs no reflash. It picks the quietest of channels 1, 6 and 11 at
+boot. The laptop setup is in the file's header.
+
+Shelved once 2.4G Only fixed the hotspot, and kept as a documented
+fallback pending the user's call. Two rules if it is ever used:
+**never run it and the Windows hotspot at once** (one name, and the
+panel joins whichever is louder), and testing it takes the laptop off
+the internet — tether a phone over USB first, or the session running
+on the laptop goes offline.
 
 ### Deliberate gaps, not TODOs
 
@@ -583,20 +760,23 @@ the PNGs. It needs Pillow.
 ## Safety net
 
 - Git repo: `https://github.com/agent192007/homemesh-panel` (private).
-  Pushed and current as of the end of 16 Oct, tags included.
-- Tag **`v0.3-runtime-layout`** is current: the panel reads its entity
-  table from NVS, falling back to the compiled `ha_layout.h`. Boots
-  clean on the board, 15 Oct. Rollback is
-  `git reset --hard v0.3-runtime-layout`.
+  Pushed and current as of 18 Oct.
+- Tag **`v0.3-runtime-layout`** is the newest tag: the panel reads its
+  entity table from NVS, falling back to the compiled `ha_layout.h`.
+  Boots clean on the board, 15 Oct. Rollback is
+  `git reset --hard v0.3-runtime-layout`. `main` is ahead of it — the
+  icons, the tile look and `subscribe_entities` — with no tag yet.
 - Tag **`v0.2-ha-websocket-demo`** is the last build with the entity
   table compiled in. Use it if the runtime layout path misbehaves —
   it is the same demo, minus the push.
 - Tag **`v0.1-working-demo`** is the older static MQTT build.
 - Working binaries saved **outside** the project at
-  `../homemesh_ha_firmware_15oct.bin` (current) and
+  `../homemesh_ha_firmware_15oct.bin` and
   `../homemesh_ha_firmware_17sep.bin` — `.pio` is gitignored, so the
   repo cannot rebuild it if the toolchain misbehaves. This is the real
-  demo insurance.
+  demo insurance. Both predate 17-18 Oct: they fetch state over REST,
+  so they are only as good as the network, and have no icons. **No
+  binary of the 18 Oct firmware has been saved yet.**
   - The `../homemesh_demo_firmware_12sep.bin` this file used to name was
     **missing** when checked on 17 Sep, and nothing in the repo could
     reconstruct it. If the MQTT fallback is wanted, rebuild `env:panel`
@@ -604,7 +784,24 @@ the PNGs. It needs Pillow.
 - **`tools/preflight.ps1`** checks the things that do not survive a
   reboot — hotspot, firewall path, container, HA reachable on the
   hotspot address, token valid, every layout entity still present. Run
-  it from cold before demoing. Exits with the number of failures.
+  it from cold before demoing. Exits with the number of failures. It
+  does **not** yet check that the WiFi card is pinned to 2.4G Only.
+- A healthy boot on the panel's serial log, 18 Oct — compare against
+  this before suspecting anything else:
+
+  ```
+  [layout] loaded from NVS: 5 entities, 3 areas, 2 sensors (275/2560 arena)
+  [wifi] connecting to '<WIFI_SSID>'
+  [mem] UI built: LVGL pool peak 13026 of 40960 (31%), now 15652 free, largest block 14968 | heap 161028 free, low 158632
+  [wifi] connected, IP 192.168.137.225, RSSI -35 dBm, modem sleep off
+  [ha] connecting to ws://192.168.137.1:8123/api/websocket
+  [ha] websocket open, waiting for auth_required
+  [ha] authenticated
+  [ha] subscribed to 7 entities
+  [ha] listening for homemesh_layout
+  [ha] net task stack free: 8272 bytes
+  [ha] initial state: 7 entities in one 2475-byte frame
+  ```
 - The WebSocket work landed on `feat/ui-paged-navigation`, not
   `feat/ha-websocket` as originally planned, and is merged. **`main` is
   the demoable branch** — it has the paged UI, the discovery tool, the
