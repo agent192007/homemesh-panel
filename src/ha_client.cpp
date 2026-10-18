@@ -1,5 +1,4 @@
 #include <Arduino.h>
-#include <HTTPClient.h>
 #include <WiFi.h>
 #include <WebSocketsClient.h>
 #include <ArduinoJson.h>
@@ -15,13 +14,20 @@
 //  never calls get_states - that is hundreds of KB on a real instance
 //  and will not fit on a WROOM-32 with no PSRAM. Instead:
 //
-//    - which entities exist comes from include/ha_layout.h, which
-//      tools/ha_discover.py generates on the PC
-//    - live updates come from one subscribe_trigger naming exactly
-//      those entity_ids, so every frame is small and bounded
-//    - initial state comes from one REST GET per entity at boot.
-//      subscribe_trigger only fires on *change*, so without this the
-//      panel would show everything off until something moved.
+//    - which entities exist comes from the layout: pushed from the
+//      desktop tool into NVS, or the compiled ha_layout.h fallback
+//    - state comes from one subscribe_entities naming exactly those
+//      entity_ids. HA answers with a snapshot of all of them, then
+//      sends only what changes - everything over this one socket.
+//
+//  Initial state used to be one REST GET per entity, made from inside
+//  the WebSocket callback. On the hotspot those GETs time out (HA
+//  answers the identical request from the laptop in milliseconds, so
+//  the radio path is the problem, not HA), and while they blocked, the
+//  heartbeat could not run: the library dropped the socket and the
+//  panel looped through reconnects with every tile reading "--".
+//  subscribe_entities needs no extra connections, so that whole
+//  failure mode is gone rather than handled.
 //
 //  Build with env:ha.
 // ------------------------------------------------------------
@@ -33,7 +39,7 @@
 static const uint32_t RETRY_MS = 5000;
 
 // HA requires message ids to be strictly increasing per connection;
-// 1 is always the trigger subscription, 2 the layout event one.
+// 1 is always the entities subscription, 2 the layout event one.
 static const uint16_t ID_SUBSCRIBE = 1;
 static const uint16_t ID_SUBSCRIBE_EVENTS = 2;
 static uint16_t next_id = 3;
@@ -92,11 +98,13 @@ static void domain_of(const char *entity_id, char *out, size_t n) {
 // Shared by the REST boot fetch and the live trigger events, so both
 // paths interpret HA's attributes identically.
 static void apply_entity_state(uint8_t i, const char *state, JsonVariantConst attrs) {
-  if (!state) return;
-
+  // State is optional. A change that only moved an attribute - the
+  // brightness of a light that was already on - arrives with no "s"
+  // at all, and its attributes still have to land.
+  //
   // "unavailable" and "unknown" mean the integration cannot reach the
   // device. Both fall through to off rather than being guessed at.
-  post(EventType::Power, i, strcmp(state, "on") == 0);
+  if (state) post(EventType::Power, i, strcmp(state, "on") == 0);
 
   if (g_layout.ents[i].kind == EntityKind::Toggle) return;
   if (attrs.isNull()) return;
@@ -124,65 +132,16 @@ static void apply_sensor_state(uint8_t i, const char *state) {
        g_layout.sens[i].area, 0, v);
 }
 
-// ------------------------------------------------------------
-//  Initial state, over REST
-// ------------------------------------------------------------
-
-static bool fetch_one_state(const char *entity_id, char *state_out, size_t state_n,
-                            DynamicJsonDocument &doc) {
-  char url[128];
-  snprintf(url, sizeof(url), "http://%s:%d/api/states/%s", HA_HOST, HA_PORT, entity_id);
-
-  HTTPClient http;
-  http.setTimeout(3000);
-  if (!http.begin(url)) return false;
-  http.addHeader("Authorization", "Bearer " HA_TOKEN);
-
-  int code = http.GET();
-  if (code != HTTP_CODE_OK) {
-    Serial.printf("[ha] GET %s -> %d\n", entity_id, code);
-    http.end();
-    return false;
+// One entity_id from a subscribe_entities frame, whichever table it
+// belongs to. State may be null - see apply_entity_state.
+static void apply_one(const char *eid, const char *state, JsonVariantConst attrs) {
+  int i = entity_index(eid);
+  if (i >= 0) {
+    apply_entity_state(i, state, attrs);
+    return;
   }
-
-  // Only the fields we use, so a light with a long effect_list cannot
-  // overflow the document.
-  StaticJsonDocument<128> filter;
-  filter["state"] = true;
-  filter["attributes"]["brightness"] = true;
-  filter["attributes"]["rgb_color"] = true;
-
-  doc.clear();
-  DeserializationError err = deserializeJson(doc, http.getStream(),
-                                             DeserializationOption::Filter(filter));
-  http.end();
-  if (err) {
-    Serial.printf("[ha] parse %s: %s\n", entity_id, err.c_str());
-    return false;
-  }
-
-  const char *s = doc["state"];
-  if (!s) return false;
-  strncpy(state_out, s, state_n - 1);
-  state_out[state_n - 1] = '\0';
-  return true;
-}
-
-static void fetch_initial_states() {
-  DynamicJsonDocument doc(768);
-  char state[24];
-
-  for (uint8_t i = 0; i < g_layout.ent_n; i++) {
-    if (fetch_one_state(g_layout.ents[i].id, state, sizeof(state), doc))
-      apply_entity_state(i, state, doc["attributes"]);
-    vTaskDelay(pdMS_TO_TICKS(20));  // keep IDLE0 fed between requests
-  }
-  for (uint8_t i = 0; i < g_layout.sens_n; i++) {
-    if (fetch_one_state(g_layout.sens[i].id, state, sizeof(state), doc))
-      apply_sensor_state(i, state);
-    vTaskDelay(pdMS_TO_TICKS(20));
-  }
-  Serial.println("[ha] initial state loaded");
+  i = sensor_index(eid);
+  if (i >= 0) apply_sensor_state(i, state);
 }
 
 // ------------------------------------------------------------
@@ -195,31 +154,44 @@ static void send_auth() {
   ws.sendTXT(buf);
 }
 
+// One text buffer for the two jobs that need a big one: building the
+// subscribe message, and re-serialising a pushed layout before it is
+// stored. They never overlap - the subscription goes out on auth_ok,
+// and a push restarts the board when it is done.
+//
+// Shared rather than one each because env:ha's static DRAM is within
+// ~1.5KB of the linker's limit: a second 2KB buffer alone fails to
+// link. At file scope, not on the stack, for the reason in Known traps.
+static char text_buf[LAYOUT_MAX_JSON + 1];
+
 // One subscription covering every entity in the layout. Built by hand
-// rather than through ArduinoJson so the whole message is one bounded
-// stack buffer.
-static void send_subscribe() {
-  char buf[1024];
-  int n = snprintf(buf, sizeof(buf),
-                   "{\"id\":%u,\"type\":\"subscribe_trigger\","
-                   "\"trigger\":{\"platform\":\"state\",\"entity_id\":[",
+// rather than through ArduinoJson so the message is one bounded
+// buffer. The old version used 1KB of stack and stopped adding ids
+// when it ran short, silently, so whatever fell off the end of a long
+// layout simply never updated. This one says so.
+
+static void send_subscribe_entities() {
+  char *sub_buf = text_buf;
+  const size_t sub_n = sizeof(text_buf);
+  int n = snprintf(sub_buf, sub_n,
+                   "{\"id\":%u,\"type\":\"subscribe_entities\",\"entity_ids\":[",
                    ID_SUBSCRIBE);
-
-  bool first = true;
-  for (uint8_t i = 0; i < g_layout.ent_n; i++) {
-    n += snprintf(buf + n, sizeof(buf) - n, "%s\"%s\"", first ? "" : ",", g_layout.ents[i].id);
-    first = false;
-    if (n >= (int)sizeof(buf) - 64) break;
+  uint8_t total = g_layout.ent_n + g_layout.sens_n, sent = 0;
+  for (uint8_t k = 0; k < total; k++) {
+    const char *id = k < g_layout.ent_n ? g_layout.ents[k].id
+                                        : g_layout.sens[k - g_layout.ent_n].id;
+    if ((size_t)n + strlen(id) + 8 >= sub_n) break;  // room for "]}"
+    n += snprintf(sub_buf + n, sub_n - n, "%s\"%s\"", sent ? "," : "", id);
+    sent++;
   }
-  for (uint8_t i = 0; i < g_layout.sens_n; i++) {
-    n += snprintf(buf + n, sizeof(buf) - n, "%s\"%s\"", first ? "" : ",", g_layout.sens[i].id);
-    first = false;
-    if (n >= (int)sizeof(buf) - 64) break;
-  }
-  snprintf(buf + n, sizeof(buf) - n, "]}}");
+  snprintf(sub_buf + n, sub_n - n, "]}");
+  ws.sendTXT(sub_buf);
 
-  ws.sendTXT(buf);
-  Serial.printf("[ha] subscribed to %d entities\n", g_layout.ent_n + g_layout.sens_n);
+  if (sent < total)
+    Serial.printf("[ha] SUBSCRIPTION TRUNCATED: %u of %u entities - "
+                  "the rest will never update\n", sent, total);
+  else
+    Serial.printf("[ha] subscribed to %u entities\n", sent);
 }
 
 // Layout pushes arrive as a custom HA event rather than over a second
@@ -236,16 +208,18 @@ static void send_subscribe_events() {
   Serial.println("[ha] listening for " LAYOUT_EVENT);
 }
 
-// The one message too big for the filtered hot path, so it gets its
-// own parse. That cost is paid only when a push actually arrives;
-// every state event still goes through the small bounded document.
-// At file scope, NOT on the stack. The net task gets 8KB and the
-// WebSockets call chain is already ~20 frames deep by the time a
-// frame reaches handle_text; a 4KB document on top of that overflows
-// and trips the stack canary. GCC also inlines handle_layout_push
-// into handle_text, so the cost would be paid on *every* frame, not
-// just a push. Only the net task touches this.
-static StaticJsonDocument<4096> layout_doc;
+// The two messages too big for the filtered hot path - a layout push
+// and the subscribe_entities snapshot - each get their own parse into
+// this. They are handled one at a time on the same task, and a push
+// restarts the board, so they never need it at once.
+//
+// At file scope, NOT on the stack. The WebSockets call chain is
+// already ~20 frames deep by the time a frame reaches handle_text; a
+// 4KB document on top of that overflows and trips the stack canary.
+// GCC also inlines these handlers into handle_text, so a local here
+// would be paid on *every* frame, not just the big ones. Only the net
+// task touches this.
+static StaticJsonDocument<4096> big_doc;
 
 // Bounded substring search over a raw frame. The WebSockets library
 // does not promise a NUL terminator on the payload, so this does not
@@ -263,7 +237,7 @@ static void handle_layout_push(uint8_t *payload, size_t len) {
   StaticJsonDocument<128> filter;
   filter["event"]["data"]["layout"] = true;
 
-  StaticJsonDocument<4096> &doc = layout_doc;
+  StaticJsonDocument<4096> &doc = big_doc;
   DeserializationError jerr = deserializeJson(doc, payload, len,
                                               DeserializationOption::Filter(filter));
   if (jerr) {
@@ -280,9 +254,9 @@ static void handle_layout_push(uint8_t *payload, size_t len) {
   // Re-serialise just the layout subtree, so the bytes stored are
   // exactly the bytes that boot - no second opinion about the format
   // between receiving it and reading it back.
-  static char buf[LAYOUT_MAX_JSON + 1];
-  size_t n = serializeJson(layout, buf, sizeof(buf));
-  if (n == 0 || n >= sizeof(buf)) {
+  char *buf = text_buf;
+  size_t n = serializeJson(layout, buf, sizeof(text_buf));
+  if (n == 0 || n >= sizeof(text_buf)) {
     Serial.printf("[layout] push too large to store (>%u bytes)\n",
                   (unsigned)LAYOUT_MAX_JSON);
     return;
@@ -306,6 +280,71 @@ static void handle_layout_push(uint8_t *payload, size_t len) {
   ESP.restart();
 }
 
+// subscribe_entities frames - the panel's whole view of state. Two
+// shapes, both keyed by entity_id:
+//
+//   {"event":{"a":{"light.x":{"s":"on","a":{...}}, ...}}}
+//       the snapshot: every subscribed entity, once, right after
+//       subscribing. 2536 bytes for the 7-entity demo layout.
+//   {"event":{"c":{"light.x":{"+":{"s":"off","a":{...}}}}}}
+//       a change: only what moved. "s" is absent when only an
+//       attribute changed, and turning a light off sends its
+//       brightness as null.
+//
+// Both measured against the real HA (2026.9) before this was written.
+// The snapshot is too big for the hot path's small document, so it
+// gets its own parse, like a layout push and for the same reason - do
+// not widen the shared filter to fit it.
+//
+// Ceiling worth knowing: the library refuses frames over 15KB and
+// drops the connection. A layout of 12 entities with demo-sized
+// attributes is ~5KB; an entity with an enormous attribute (a WLED
+// light with 100 effects in effect_list) could push a snapshot over.
+static void handle_entities_event(uint8_t *payload, size_t len) {
+  // "*" is ArduinoJson's wildcard for any key - here, any entity_id.
+  StaticJsonDocument<384> filter;
+  filter["id"] = true;
+  JsonObject add = filter["event"]["a"]["*"].to<JsonObject>();
+  add["s"] = true;
+  add["a"]["brightness"] = true;
+  add["a"]["rgb_color"] = true;
+  JsonObject chg = filter["event"]["c"]["*"]["+"].to<JsonObject>();
+  chg["s"] = true;
+  chg["a"]["brightness"] = true;
+  chg["a"]["rgb_color"] = true;
+  if (filter.overflowed())
+    Serial.println("[ha] ENTITIES FILTER OVERFLOWED - increase its size");
+
+  DeserializationError err = deserializeJson(big_doc, payload, len,
+                                             DeserializationOption::Filter(filter));
+  if (err) {
+    Serial.printf("[ha] entities frame (%u bytes) will not parse: %s\n",
+                  (unsigned)len, err.c_str());
+    return;
+  }
+  // An overflowed document drops entities without an error, which
+  // would look like some tiles never loading. Say so instead.
+  if (big_doc.overflowed())
+    Serial.printf("[ha] ENTITIES DOCUMENT OVERFLOWED on a %u-byte frame - "
+                  "some entities will not update\n", (unsigned)len);
+  if (big_doc["id"].as<unsigned>() != ID_SUBSCRIBE) return;
+
+  JsonObjectConst snap = big_doc["event"]["a"].as<JsonObjectConst>();
+  for (JsonPairConst kv : snap) {
+    JsonVariantConst e = kv.value();
+    apply_one(kv.key().c_str(), e["s"].as<const char *>(), e["a"]);
+  }
+  JsonObjectConst changes = big_doc["event"]["c"].as<JsonObjectConst>();
+  for (JsonPairConst kv : changes) {
+    JsonVariantConst plus = kv.value()["+"];
+    apply_one(kv.key().c_str(), plus["s"].as<const char *>(), plus["a"]);
+  }
+
+  if (!snap.isNull())
+    Serial.printf("[ha] initial state: %u entities in one %u-byte frame\n",
+                  (unsigned)snap.size(), (unsigned)len);
+}
+
 static void handle_text(uint8_t *payload, size_t len) {
   // Filtered so a state event carrying a long attribute list still
   // parses into a small fixed document.
@@ -324,17 +363,24 @@ static void handle_text(uint8_t *payload, size_t len) {
     return;
   }
 
-  // 512, not 256. The filter is about 14 nested keys and was close
-  // enough to full that adding one more silently truncated it.
-  StaticJsonDocument<512> filter;
+  // State takes its own path for the same reason, also decided on the
+  // raw bytes. HA serialises compactly, so a snapshot always contains
+  // "event":{"a": and a change "event":{"c": - neither of which a
+  // control message or a layout push can.
+  if (frame_contains(payload, len, "\"event\":{\"a\":") ||
+      frame_contains(payload, len, "\"event\":{\"c\":")) {
+    handle_entities_event(payload, len);
+    return;
+  }
+
+  // Everything left is a control message: auth, and command results.
+  // Kept as its own small filter so a key added for one purpose can
+  // never crowd out another - ArduinoJson drops keys that do not fit
+  // a fixed document without an error.
+  StaticJsonDocument<256> filter;
   filter["type"] = true;
   filter["success"] = true;
   filter["error"]["message"] = true;
-  JsonObject trig = filter["event"]["variables"]["trigger"].to<JsonObject>();
-  trig["entity_id"] = true;
-  trig["to_state"]["state"] = true;
-  trig["to_state"]["attributes"]["brightness"] = true;
-  trig["to_state"]["attributes"]["rgb_color"] = true;
 
   // Say so loudly rather than quietly misbehaving. An overflowed
   // filter means some state updates stop arriving, which looks like a
@@ -366,7 +412,7 @@ static void handle_text(uint8_t *payload, size_t len) {
   if (strcmp(type, "auth_ok") == 0) {
     Serial.println("[ha] authenticated");
     authed = true;
-    send_subscribe();
+    send_subscribe_entities();
     send_subscribe_events();
     // Report the margin rather than waiting to discover it as a boot
     // loop. This is the deepest the task gets in normal operation.
@@ -374,7 +420,8 @@ static void handle_text(uint8_t *payload, size_t len) {
                   (unsigned)uxTaskGetStackHighWaterMark(nullptr));
     post(EventType::Link, 0, (int32_t)LinkState::Online);
     post(EventType::DevicesAvailable, 0, 1);
-    fetch_initial_states();
+    // No initial fetch: the subscribe_entities snapshot is the
+    // initial state, and it arrives on this socket within ~100ms.
     return;
   }
 
@@ -391,21 +438,6 @@ static void handle_text(uint8_t *payload, size_t len) {
     if (!doc["success"].as<bool>())
       Serial.printf("[ha] command failed: %s\n", doc["error"]["message"] | "?");
     return;
-  }
-
-  if (strcmp(type, "event") == 0) {
-    JsonVariantConst t = doc["event"]["variables"]["trigger"];
-    const char *eid = t["entity_id"];
-    const char *state = t["to_state"]["state"];
-    if (!eid || !state) return;
-
-    int i = entity_index(eid);
-    if (i >= 0) {
-      apply_entity_state(i, state, t["to_state"]["attributes"]);
-      return;
-    }
-    i = sensor_index(eid);
-    if (i >= 0) apply_sensor_state(i, state);
   }
 }
 
@@ -497,8 +529,36 @@ static void run_command(const Command &c) {
 //  Task
 // ------------------------------------------------------------
 
+// Why WiFi dropped or never joined, by the driver's own reason code.
+// This path used to print nothing: a panel that could not join the
+// hotspot sat at "connecting" with no clue which of a dozen causes it
+// was. A repeated reason is counted rather than reprinted, so an hour
+// out of range is not a thousand lines. Runs on the WiFi event task.
+static volatile uint8_t wifi_last_reason;
+static uint16_t wifi_repeats;
+
+static void on_wifi_disconnected(WiFiEvent_t, WiFiEventInfo_t info) {
+  uint8_t r = info.wifi_sta_disconnected.reason;
+  const char *name = WiFi.disconnectReasonName((wifi_err_reason_t)r);
+  if (r == wifi_last_reason) {
+    if (++wifi_repeats % 10) return;
+    Serial.printf("[wifi] still not connected: reason %u (%s), %u times\n",
+                  r, name, wifi_repeats + 1);
+    return;
+  }
+  wifi_last_reason = r;
+  wifi_repeats = 0;
+  Serial.printf("[wifi] not connected: reason %u (%s)\n", r, name);
+}
+
+static void on_wifi_got_ip(WiFiEvent_t, WiFiEventInfo_t) {
+  wifi_last_reason = 0;  // so the next drop is reported, whatever its reason
+}
+
 static void net_task(void *) {
   WiFi.mode(WIFI_STA);
+  WiFi.onEvent(on_wifi_disconnected, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+  WiFi.onEvent(on_wifi_got_ip, ARDUINO_EVENT_WIFI_STA_GOT_IP);
   WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.printf("[wifi] connecting to '%s'\n", WIFI_SSID);
@@ -519,7 +579,22 @@ static void net_task(void *) {
     }
 
     if (!announced) {
-      Serial.printf("[wifi] connected, IP %s\n", WiFi.localIP().toString().c_str());
+      // Modem sleep off. On by default, it has the radio doze between
+      // beacons and rely on the access point to hold packets for it -
+      // something soft APs like Windows Mobile Hotspot are known to do
+      // badly. Not proven to have caused anything here: the link
+      // failures of 18 Oct turned out to be the hotspot following the
+      // laptop internet link onto 5GHz, where this 2.4GHz-only radio
+      // cannot see it (reason 201, NO_AP_FOUND). It is kept because it
+      // closes one more way for replies to the panel to go missing,
+      // for some tens of mA that a mains-powered panel does not mind.
+      //
+      // Set once joined rather than before WiFi.begin(), so it can
+      // never be a suspect in joining. The driver keeps it across
+      // reconnects.
+      WiFi.setSleep(false);
+      Serial.printf("[wifi] connected, IP %s, RSSI %d dBm, modem sleep off\n",
+                    WiFi.localIP().toString().c_str(), WiFi.RSSI());
       announced = true;
     }
 
