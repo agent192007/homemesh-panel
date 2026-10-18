@@ -761,22 +761,44 @@ on the laptop goes offline.
 
 - Git repo: `https://github.com/agent192007/homemesh-panel` (private).
   Pushed and current as of 18 Oct.
-- Tag **`v0.3-runtime-layout`** is the newest tag: the panel reads its
-  entity table from NVS, falling back to the compiled `ha_layout.h`.
-  Boots clean on the board, 15 Oct. Rollback is
-  `git reset --hard v0.3-runtime-layout`. `main` is ahead of it — the
-  icons, the tile look and `subscribe_entities` — with no tag yet.
+- Tag **`v0.4-firmware-freeze`** is current, 18 Oct: icons, the tile
+  look, state over `subscribe_entities`, and LVGL failures that name
+  themselves. This is the demo firmware. Rollback is
+  `git reset --hard v0.4-firmware-freeze`.
+- Tag **`v0.3-runtime-layout`**: the panel reads its entity table from
+  NVS, falling back to the compiled `ha_layout.h`. Boots clean on the
+  board, 15 Oct, but still fetches state over REST.
 - Tag **`v0.2-ha-websocket-demo`** is the last build with the entity
   table compiled in. Use it if the runtime layout path misbehaves —
   it is the same demo, minus the push.
 - Tag **`v0.1-working-demo`** is the older static MQTT build.
-- Working binaries saved **outside** the project at
-  `../homemesh_ha_firmware_15oct.bin` and
-  `../homemesh_ha_firmware_17sep.bin` — `.pio` is gitignored, so the
-  repo cannot rebuild it if the toolchain misbehaves. This is the real
-  demo insurance. Both predate 17-18 Oct: they fetch state over REST,
-  so they are only as good as the network, and have no icons. **No
-  binary of the 18 Oct firmware has been saved yet.**
+- Working binaries saved **outside** the project — `.pio` is
+  gitignored, so the repo cannot rebuild them if the toolchain
+  misbehaves. This is the real demo insurance. Both 18 Oct images were
+  built from a clean tree at the commit `v0.4-firmware-freeze` tags,
+  and byte-checked against the build.
+  - **`../homemesh_ha_firmware_18oct_full.bin`** (current) —
+    bootloader, partition table and app in one image, so it restores a
+    board whatever was flashed to it last (`env:panel` and `env:demo`
+    use a different partition table). From the project folder:
+
+    ```
+    %USERPROFILE%\.platformio\penv\Scripts\python.exe %USERPROFILE%\.platformio\packages\tool-esptoolpy\esptool.py --chip esp32 --port COM7 --baud 921600 write_flash 0x0 ..\homemesh_ha_firmware_18oct_full.bin
+    ```
+
+    **It erases the pushed layout.** `merge_bin` pads the gaps between
+    parts with 0xFF, and NVS (`0x9000`-`0xDFFF`) is one of them, so the
+    panel comes back on the compiled `ha_layout.h` — which matched the
+    pushed layout on 18 Oct. Push again from the designer if it has
+    changed since. SHA-256 `befe1d08…94ccbe`.
+  - `../homemesh_ha_firmware_18oct.bin` — the same app alone. Write it
+    at `0x10000` onto a board already on the `env:ha` partition table;
+    that leaves NVS, and so the pushed layout, alone. SHA-256
+    `70053bc8…0f13b`.
+  - `../homemesh_ha_firmware_15oct.bin` and
+    `../homemesh_ha_firmware_17sep.bin` are app-only and predate
+    17-18 Oct: state over REST, so only as good as the network, and no
+    icons.
   - The `../homemesh_demo_firmware_12sep.bin` this file used to name was
     **missing** when checked on 17 Sep, and nothing in the repo could
     reconstruct it. If the MQTT fallback is wanted, rebuild `env:panel`
