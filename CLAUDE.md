@@ -871,6 +871,16 @@ and the review-morning checklist.
 `docs/PROJECT_BRIEF.md` (18 Oct) is secondary now; it still describes
 the tkinter designer in its body.
 
+**Team roles for the review (given 21 Oct).** The user assigned them so
+each member owns an area to present and answer for: **Pranesh S** team
+lead, hardware and firmware architecture; **Garima Nidhi** UI/UX lead,
+panel interface and the designer; **Taniska Routray** Home Assistant,
+protocol and networking (assigned by Claude to fill the gap); **Bharadhwaj
+B** testing, research and documentation (likewise). They live in
+`ROLES`, `PRESENTS` and `ANSWERS` in `docs/build_documentation.py` (title
+page, Appendix A: who presents each slide and takes each question) and
+in the README's Team table. Change them there if the user does.
+
 ### 5. ESP32 access point — written 18 Oct, never run
 
 `src/access_point.cpp`, built as `env:ap`: a second ESP32 as the demo's

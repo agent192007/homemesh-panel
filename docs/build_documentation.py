@@ -42,6 +42,21 @@ SUBMISSION = "21 October 2026"
 TEAM = [("Garima Nidhi", "24BCE1782"), ("Taniska Routray", "24BCE1578"),
         ("Bharadhwaj B", "24BCE1959"), ("Pranesh S", "24BCE5138")]
 GUIDE = "Suhasini S"
+# Each member's area for the review: what they present and answer for.
+ROLES = {
+    "Pranesh S": "Team lead; hardware and firmware architecture",
+    "Garima Nidhi": "UI/UX lead; panel interface and the designer app",
+    "Taniska Routray": "Home Assistant, protocol and networking",
+    "Bharadhwaj B": "Testing, research and documentation",
+}
+# Slide number -> presenter (first name), Appendix A.
+PRESENTS = {1: "Pranesh", 2: "Garima", 3: "Bharadhwaj", 4: "Pranesh", 5: "Bharadhwaj", 6: "Bharadhwaj",
+            7: "Taniska", 8: "Taniska", 9: "Pranesh", 10: "Pranesh", 11: "Pranesh", 12: "Garima",
+            13: "Taniska", 14: "Taniska", 15: "Garima", 16: "Garima", 17: "Bharadhwaj", 18: "Taniska",
+            19: "Bharadhwaj", 20: "Pranesh + Garima (demo)"}
+# Who takes each anticipated question, in the order of that table.
+ANSWERS = ["Pranesh", "Taniska", "Taniska", "Garima", "Pranesh", "Garima", "Taniska", "Garima", "Pranesh",
+           "Garima", "Taniska", "Pranesh"]
 
 FONT = "Calibri"
 MONO = "Consolas"
@@ -392,7 +407,7 @@ table(["", ""], [
     ["Project title", "HomeMesh Panel — local-first smart home control panel"],
     ["Institution", "Vellore Institute of Technology, Chennai"],
     ["Course", "CSE3006 — Embedded System Design"],
-    ["Team members", "\n".join(n for n, _ in TEAM)],
+    ["Team members", "\n".join(f"{n} — {ROLES[n]}" for n, _ in TEAM)],
     ["Register numbers", "\n".join(f"{r}  ({n})" for n, r in TEAM)],
     ["Faculty guide", GUIDE],
     ["Date of submission", SUBMISSION],
@@ -1193,9 +1208,39 @@ for i, t in enumerate(tech, len(order) + 1):
 #  APPENDIX A — PRESENTATION PLAN
 # ======================================================================
 h1("Appendix A — Suggested Presentation Plan", new_page=True)
+h2("Team roles")
+para("Each member owns one area of the project for the review: they present its slides and take the questions "
+     "on it. The slide plan and the question list below say who.")
+table(["Member", "Role", "Presents", "Must be able to explain"], [
+    ["Pranesh S", ROLES["Pranesh S"], "Title, problem statement, the memory wall, architecture, hardware, "
+     "conclusion and demo",
+     "The PC/panel split and its numbers (§6.1); the board, pins and batch variation (§8); the two cores, the "
+     "queue and priority 0 (§10.2); memory strategy (§10.3); why a layout restarts the panel (§10.5); flashing "
+     "and recovery (Appendix B)"],
+    ["Garima Nidhi", ROLES["Garima Nidhi"], "Introduction, software architecture, the interface, the designer; "
+     "drives the designer in the demo",
+     "Tiles, the on state and the detail panel (§10.6); themes (§10.7); why fills are flat (gradient banding); "
+     "the designer, its simulator, custom names and pages (§11); why LVGL 8.3"],
+    ["Taniska Routray", ROLES["Taniska Routray"], "Why not MQTT, proposed system, protocol, layout as data, "
+     "the field case study",
+     "Home Assistant (§2.1); why MQTT was dropped (§5.1); the five messages (§10.1); how a layout reaches the "
+     "panel (§10.5); the hotspot setup (§12.1); the Wi-Fi diagnosis (§13.4); the preflight script"],
+    ["Bharadhwaj B", ROLES["Bharadhwaj B"], "Literature survey, objectives, existing systems, results, future "
+     "scope",
+     "The literature survey (§2.2); objectives and existing systems (§4, §5); every measured number and how it "
+     "was measured (§13.1–13.3); future scope (§14); the IEEE paper"],
+], [2.6, 3.4, 4.2, 5.8], size=8.5)
+callout("Before the review, each member should", [
+    "Read their sections twice and say the key numbers out loud: 57,671 bytes vs 2,403; 40 KB of graphics "
+    "memory; 3.2 ms; 40 ms; 12 devices and 6 pages.",
+    "Run the demo once with their own hands: tap a light, swipe the pages, open a detail panel, and change a "
+    "light in Home Assistant's web page to watch the panel follow.",
+    "Know the two quirks and the \"do not claim\" list in Appendix B.",
+], fill=INFO_FILL)
+h2("Slides")
 para("Twenty slides. The content for each is drawn from the section shown, so nothing needs writing from "
      "scratch. Figure files are in <c>docs/figures/</c> and <c>docs/paper/</c>.")
-table(["#", "Slide", "What to put on it", "Source / figure"], [
+table(["#", "Slide", "What to put on it", "Source / figure", "Presents"], [r + [PRESENTS[int(r[0])]] for r in [
     ["1", "Title", "Project title, course code, team members with register numbers, guide, date.", "Title page"],
     ["2", "Introduction", "Phone apps are slower than the switch they replace; a panel is always on and always "
      "in one place. No cloud.", "§2"],
@@ -1225,7 +1270,7 @@ table(["#", "Slide", "What to put on it", "Source / figure"], [
     ["19", "Future scope", "Encryption, multi-cell tiles, acknowledged push, microSD, dedicated access point.",
      "§14"],
     ["20", "Conclusion + demo", "The three decisions. Then the live demonstration.", "§15"],
-], [0.8, 3.0, 8.4, 3.8], size=8.5)
+]], [0.7, 2.5, 6.7, 3.6, 2.5], size=8.5)
 h2("Figure files")
 table(["Figure", "File"], [
     ["Overall architecture", "docs/figures/arch_overall.png"],
@@ -1250,7 +1295,8 @@ bullets([
     "the real panel for at least one slide, so nobody thinks it is a mock-up.",
 ])
 h2("Anticipated questions")
-table(["Question", "Answer"], [
+assert len(ANSWERS) == 12, "one answerer per anticipated question"
+table(["Question", "Answer", "Answers"], [r + [a] for r, a in zip([
     ["Why not a Raspberry Pi with a browser?", "Cost, boot time and power. This starts in a couple of seconds "
      "and draws a fraction of the power, with no operating system to maintain on a wall."],
     ["What happens if Home Assistant goes down?", "The connection drops, the panel sees it immediately and greys "
@@ -1275,7 +1321,7 @@ table(["Question", "Answer"], [
     ["Is it secure?", "On an isolated hotspot, yes enough. The connection is unencrypted and the token is in "
      "the firmware, so a real home would need TLS — listed as future work."],
     ["What is the microSD card for?", "Nothing yet; it has not been tested. Logging is the likely use."],
-], [5.0, 11.0], size=9)
+], ANSWERS, strict=True)], [4.4, 9.4, 2.2], size=9)
 
 # ======================================================================
 #  APPENDIX B — INTERNAL NOTE

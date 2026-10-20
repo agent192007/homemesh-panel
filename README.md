@@ -332,7 +332,12 @@ ha/           how the Home Assistant instance is run
 
 <div align="center">
 
-**Garima Nidhi** · **Taniska Routray** · **Bharadhwaj B** · **Pranesh S**
+| | Member | Role |
+|:--:|---|---|
+| 🧭 🔌 | **Pranesh S** | Team lead · hardware and firmware architecture |
+| 🎨 | **Garima Nidhi** | UI/UX lead · panel interface and the designer app |
+| 🏠 | **Taniska Routray** | Home Assistant, protocol and networking |
+| 🧪 | **Bharadhwaj B** | Testing, research and documentation |
 
 Faculty guide: **Suhasini S**
 
