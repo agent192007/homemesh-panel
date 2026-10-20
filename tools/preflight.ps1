@@ -11,17 +11,20 @@ $ErrorActionPreference = 'Continue'
 $HaHost = '192.168.137.1'
 $HaPort = 8123
 
-# Must match include/ha_layout.h. If the panel shows blank tiles, an
-# entity here was renamed or removed in HA and the header is stale.
-$Entities = @(
-  'switch.ac', 'light.bed_light', 'fan.ceiling_fan',
-  'light.kitchen_lights', 'input_boolean.panel_demo_switch',
-  'light.ceiling_lights', 'switch.decorative_lights',
-  'fan.living_room_fan', 'light.living_room_rgbww_lights'
-)
+# Read from include/ha_layout.json - whatever the designer last wrote,
+# which is also what it last pushed. This list used to be typed in by
+# hand, and it went stale the first time the layout was re-authored.
+$layoutFile = Join-Path $PSScriptRoot '..\include\ha_layout.json'
+$Entities = @()
+if (Test-Path $layoutFile) {
+  $layout = Get-Content $layoutFile -Raw | ConvertFrom-Json
+  $Entities = @($layout.entities | ForEach-Object { $_.id }) +
+              @($layout.sensors | Where-Object { $_.id } | ForEach-Object { $_.id })
+}
 
 $fail = 0
 function Ok   ($m) { Write-Host "  PASS  $m" -ForegroundColor Green }
+function Note ($m) { Write-Host "  NOTE  $m" -ForegroundColor DarkYellow }
 function Bad  ($m, $fix) {
   Write-Host "  FAIL  $m" -ForegroundColor Red
   Write-Host "        -> $fix" -ForegroundColor Yellow
@@ -30,13 +33,33 @@ function Bad  ($m, $fix) {
 
 Write-Host "`nHomeMesh preflight`n" -ForegroundColor Cyan
 
+# 0. The WiFi card's band. This laptop's card (MediaTek MT7921) has one
+#    radio, so Mobile Hotspot shares a channel with the laptop's own
+#    WiFi link. If that link is on 5 GHz the hotspot follows it there,
+#    whatever the hotspot's own band setting says, and the panel - 2.4
+#    GHz only - cannot see the network at all (it logs reason 201,
+#    NO_AP_FOUND). Pinning the card to 2.4 GHz is the fix (18 Oct), and
+#    a driver update can quietly undo it. Reading the setting needs no
+#    admin rights; changing it does.
+$band = Get-NetAdapterAdvancedProperty -ErrorAction SilentlyContinue |
+        Where-Object { $_.DisplayName -eq 'Band Selection' } |
+        Select-Object -First 1
+if (-not $band) {
+  Note "no 'Band Selection' setting on any adapter - cannot check the band on this machine. If the panel logs reason 201, the hotspot is on 5 GHz."
+} elseif ($band.DisplayValue -match '2\.4') {
+  Ok "WiFi card pinned to 2.4 GHz ($($band.Name): $($band.DisplayValue))"
+} else {
+  Bad "WiFi card is '$($band.DisplayValue)' - the hotspot can follow it onto 5 GHz, where the panel cannot see it" `
+      "In an ADMIN PowerShell: Set-NetAdapterAdvancedProperty -Name '$($band.Name)' -DisplayName 'Band Selection' -DisplayValue '2. 2.4G Only'   then turn Mobile Hotspot off and on."
+}
+
 # 1. Hotspot. ICS always takes 192.168.137.1, so its presence is a
 #    reliable proxy for "the hotspot is actually running".
 $hasIp = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
          Where-Object { $_.IPAddress -eq $HaHost }
 if ($hasIp) { Ok "hotspot up ($HaHost on $($hasIp[0].InterfaceAlias))" }
 else { Bad "hotspot is not running - no $HaHost on any adapter" `
-           "Settings > Network & internet > Mobile hotspot. Band must be 2.4 GHz, and turn power saving off." }
+           "Settings > Network & internet > Mobile hotspot. Band 2.4 GHz, power saving off. It will not start without a network to share - if the venue WiFi is unusable, join the laptop to the phone's hotspot first." }
 
 # 2. Firewall. Without a path through it the panel joins WiFi fine and
 #    then times out on the WebSocket, which reads as a code bug.
@@ -85,7 +108,9 @@ try {
 #    A long-lived token survives restarts but can be revoked, and an
 #    entity renamed in HA leaves a blank tile on the panel.
 $envFile = Join-Path $PSScriptRoot '.env'
-if (-not (Test-Path $envFile)) {
+if (-not $Entities.Count) {
+  Bad "no entities read from include/ha_layout.json" "Write a layout from tools/layout_designer.py."
+} elseif (-not (Test-Path $envFile)) {
   Bad "tools/.env missing" "Recreate it with HA_URL and HA_TOKEN."
 } else {
   $token = (Get-Content $envFile | Where-Object { $_ -match '^\s*HA_TOKEN\s*=' } |
@@ -96,19 +121,27 @@ if (-not (Test-Path $envFile)) {
     $headers = @{ Authorization = "Bearer $token" }
     $missing = @()
     $authOk = $true
+    $reachable = $true
     foreach ($e in $Entities) {
       try {
         Invoke-RestMethod "http://${HaHost}:$HaPort/api/states/$e" -Headers $headers -TimeoutSec 8 | Out-Null
       } catch {
-        if ($_.Exception.Response.StatusCode.value__ -eq 401) { $authOk = $false; break }
-        $missing += $e
+        # Only a 404 means the entity is gone. No response at all means
+        # HA was not reachable - which check 4 already reports - and
+        # calling that "entities missing" sends you to re-author a
+        # perfectly good layout.
+        $status = $_.Exception.Response.StatusCode.value__
+        if ($status -eq 401) { $authOk = $false; break }
+        if ($status -eq 404) { $missing += $e } else { $reachable = $false; break }
       }
     }
-    if (-not $authOk) {
+    if (-not $reachable) {
+      Note "token and entities not checked - HA did not answer on ${HaHost}:$HaPort (see above)"
+    } elseif (-not $authOk) {
       Bad "token rejected (401)" "Create a new token in HA and update tools/.env and include/secrets.h (then reflash)."
     } elseif ($missing.Count) {
       Bad "$($missing.Count) entity(ies) in the layout no longer exist: $($missing -join ', ')" `
-          "Regenerate: python tools/ha_discover.py --list, then re-run with --include/--favourite, then reflash."
+          "Re-author in tools/layout_designer.py and push to the panel - no reflash needed."
     } else {
       Ok "token valid, all $($Entities.Count) layout entities present"
     }
