@@ -4,7 +4,7 @@ A wall-mounted smart home control panel: an ESP32 with a 3.2-inch
 touchscreen that controls every device a local Home Assistant server
 knows about, over Home Assistant's WebSocket API. No cloud in the path.
 
-VIT Chennai project — Garima Nidhi, Taniska Routray, Bharadhwaj,
+VIT Chennai project — Garima Nidhi, Taniska Routray, Bharadhwaj B,
 Pranesh S. Faculty guide: Suhasini S.
 
 ## How it fits together
