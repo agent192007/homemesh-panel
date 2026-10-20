@@ -916,7 +916,7 @@ on the laptop goes offline.
   and byte-checked against the build.
   - **`../homemesh_ha_firmware_20oct.bin` / `_20oct_full.bin`** — the
     20 Oct firmware with the name and light-theme fixes, built from
-    commit `c0ddab7`. **On the board since 20 Oct**, healthy boot log
+    commit `ece7867`. **On the board since 20 Oct**, healthy boot log
     — see "Added 20 Oct". Flash the same way as below, substituting the
     file name.
   - **`../homemesh_ha_firmware_18oct_full.bin`** (last hardware-verified) —
