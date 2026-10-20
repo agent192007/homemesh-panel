@@ -48,6 +48,12 @@ for (let p = 0; p < page; p++) {
 }
 // First tile's chevron: tile at (8, 36), 148 wide; chevron top-right.
 if (view === "detail") await tap(136, 52);
+if (view === "autos") {
+  // An upward swipe, to the Automations screen.
+  sim._sim_pointer(160, 210, 1); await run(40);
+  for (let y = 180; y >= 40; y -= 35) { sim._sim_pointer(160, y, 1); await run(20); }
+  sim._sim_pointer(160, 40, 0); await run(200);
+}
 await run(300);
 const fb = new Uint16Array(sim.HEAPU16.buffer, sim._sim_framebuffer(), 320 * 240);
 writeFileSync(outPath, Buffer.from(fb.buffer, fb.byteOffset, fb.byteLength));

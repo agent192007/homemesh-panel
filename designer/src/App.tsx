@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { bridge } from "./bridge";
 import { HaClient } from "./ha/haClient";
 import {
-  buildHeader, buildInventory, buildLayout, dumpLayout, ICON_NAMES, Inventory, Layout,
-  LAYOUT_EVENT, LAYOUT_MAX_JSON, MAX_ENTITIES, MAX_PER_PAGE, selectLayout, THEME_DEFAULTS,
+  buildHeader, buildInventory, buildLayout, dumpLayout, Inventory, Layout,
+  LAYOUT_EVENT, LAYOUT_MAX_JSON, MAX_AUTOMATIONS, MAX_ENTITIES, MAX_PER_PAGE, selectLayout, THEME_DEFAULTS,
 } from "./layout/format";
 import { presetOf, THEME_PRESETS } from "./layout/themes";
+import { Glyph, IconPicker } from "./IconPicker";
 import { Ev, Link, SimEvent } from "./sim/events";
 import { PanelSimulator, PanelSimulatorHandle } from "./sim/PanelSimulator";
 
@@ -14,6 +15,7 @@ type Mode = "system" | "dark" | "light";
 interface Sel {
   include: Set<string>; favourite: Set<string>; order: string[];
   icons: Record<string, string>; names: Record<string, string>;
+  automations: Set<string>;   // scenes, scripts, automations on the Automations screen
 }
 
 function selFromLayout(l: Layout): Sel {
@@ -25,6 +27,7 @@ function selFromLayout(l: Layout): Sel {
     // Every saved name to start with; the ones that merely repeat HA's
     // friendly name are dropped once the inventory arrives.
     names: Object.fromEntries(l.entities.map((e) => [e.id, e.name])),
+    automations: new Set(l.actions.map((a) => a.id)),
   };
 }
 interface LiveState { s?: string; brightness?: number | null; rgb?: number[] | null }
@@ -46,12 +49,13 @@ export default function App() {
   const [status, setStatus] = useState<Status>({ kind: "idle", text: "not connected" });
   const [client, setClient] = useState<HaClient | null>(null);
   const [inv, setInv] = useState<Inventory | null>(null);
-  const [sel, setSel] = useState<Sel>({ include: new Set(), favourite: new Set(), order: [], icons: {}, names: {} });
+  const [sel, setSel] = useState<Sel>({ include: new Set(), favourite: new Set(), order: [], icons: {}, names: {}, automations: new Set() });
   const [theme, setTheme] = useState<Record<string, string>>({ ...THEME_DEFAULTS });
   const [saved, setSaved] = useState<Layout | null>(null);
   // The layout as last written to the project, for "unsaved changes".
   const [baseline, setBaseline] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>(() => (localStorage.getItem("app_mode") as Mode) || "system");
+  const [project, setProject] = useState<string | null | undefined>(undefined);
   const [live, setLive] = useState(false);
   const [search, setSearch] = useState("");
   const [logs, setLogs] = useState<string[]>([]);
@@ -67,6 +71,7 @@ export default function App() {
   // ---------------------------------------------------------------- start
   useEffect(() => {
     (async () => {
+      setProject(await bridge.projectRoot());
       const env = await bridge.loadEnv();
       if (env.url) setUrl(env.url);
       if (env.token) setToken(env.token);
@@ -107,7 +112,7 @@ export default function App() {
 
   // ----------------------------------------------------------- the layout
   const tables = useMemo(() => inv ? selectLayout(inv, {
-    include: sel.include, favourite: sel.favourite, automations: new Set(), order: sel.order,
+    include: sel.include, favourite: sel.favourite, automations: sel.automations, order: sel.order,
     icons: sel.icons, names: sel.names,
   }) : null, [inv, sel]);
   const layout: Layout | null = useMemo(() => tables ? buildLayout(tables, theme) : saved, [tables, theme, saved]);
@@ -174,6 +179,16 @@ export default function App() {
   // firmware makes. Design: echoed straight back, like env:demo.
   const onCommand = useCallback((kind: number, index: number, value: number) => {
     if (!layout) return;
+    if (kind === Ev.AutomationRan) {
+      const act = layout.actions[index];
+      if (live && client && act) {
+        const domain = act.id.split(".")[0];
+        // As ha_client.cpp: scenes and scripts are turned on, automations triggered.
+        client.cmd("call_service", { domain, service: domain === "automation" ? "trigger" : "turn_on", target: { entity_id: act.id } });
+      }
+      sim.current?.post({ type: Ev.AutomationRan, entity: index, value: 1 });
+      return;
+    }
     if (live && client) {
       const ent = layout.entities[index];
       if (!ent) return;
@@ -290,16 +305,27 @@ export default function App() {
                       onClick={() => setSel((s) => ({ ...s, favourite: toggle(s.favourite, r.id) }))}>★</button>
                     <div className="ent-name"><div>{r.name}</div><code>{r.id}</code></div>
                     <span className={`kind ${r.kind}`}>{r.kind}</span>
-                    <select value={sel.icons[r.id] ?? ""} disabled={!g.area}
-                      onChange={(e) => setSel((s) => ({ ...s, icons: { ...s.icons, [r.id]: e.target.value } }))}>
-                      <option value="">auto</option>
-                      {ICON_NAMES.map((n) => <option key={n} value={n}>{n}</option>)}
-                    </select>
+                    <IconPicker entityId={r.id} value={sel.icons[r.id] ?? ""} disabled={!g.area}
+                      onChange={(icon) => setSel((s) => ({ ...s, icons: { ...s.icons, [r.id]: icon } }))} />
                   </div>
                 );
               })}
             </div>
           ))}
+          {inv && (
+            <div className="group autos">
+              <h3>Automations screen <em className="soft">· swipe up on the panel · {sel.automations.size}/{MAX_AUTOMATIONS}</em></h3>
+              {inv.actions.length === 0 && <p className="hint">No scenes, scripts or automations in Home Assistant.</p>}
+              {inv.actions.map((a) => (
+                <label key={a.id} className="ent auto-row">
+                  <input type="checkbox" checked={sel.automations.has(a.id)}
+                    disabled={!sel.automations.has(a.id) && sel.automations.size >= MAX_AUTOMATIONS}
+                    onChange={() => setSel((s) => ({ ...s, automations: toggle(s.automations, a.id) }))} />
+                  <div className="ent-name"><div>{a.name}</div><code>{a.id}</code></div>
+                </label>
+              ))}
+            </div>
+          )}
         </section>
 
         <section className="col center">
@@ -351,7 +377,7 @@ export default function App() {
                       <input className={`name-edit ${custom ? "custom" : ""}`} value={sel.names[e.id] ?? ""} placeholder={ha}
                         title={custom ? `Custom name. Home Assistant calls it "${ha}".` : "Type a shorter name for the panel"}
                         onChange={(ev) => { const v = ev.target.value; setSel((s) => ({ ...s, names: { ...s.names, [e.id]: v } })); }} />
-                      <code>{e.icon}</code>
+                      <Glyph name={e.icon} />
                     </div>
                   );
                 })}
@@ -397,10 +423,21 @@ export default function App() {
               ? <div className="verdict ok">✓ Accepted by the firmware's validator</div>
               : <div className="verdict bad">✗ The panel would reject this: {verdict.reason}</div>)}
             {tables?.notes.map((n) => <div key={n} className="note">{n}</div>)}
+            <div className="project">
+              {project
+                ? <span title={project}>Project: <code>{project}</code></span>
+                : project === null && <span className="warn-text">No project folder found — saving needs one.</span>}
+              {project !== undefined && window.homemesh && (
+                <button className="ghost small" onClick={async () => {
+                  try { if (await bridge.chooseProject()) location.reload(); }
+                  catch (e) { flash({ kind: "error", text: (e as Error).message }); }
+                }}>{project ? "Change…" : "Choose project folder…"}</button>
+              )}
+            </div>
             {dirty && <div className="dirty">● Unsaved changes — the project files still hold the previous layout.</div>}
             <div className="actions">
               <button className="ghost" onClick={revert} disabled={!dirty}>Revert</button>
-              <button onClick={save} disabled={!tables}>Save to project</button>
+              <button onClick={save} disabled={!tables || !project}>Save to project</button>
               <button className="primary" onClick={push} disabled={!client || !layout || verdict?.ok === false}>Push to panel</button>
             </div>
           </div>

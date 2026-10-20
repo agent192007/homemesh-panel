@@ -1,22 +1,41 @@
 // Electron main process: one window, and three narrow file operations
 // exposed through the preload - read the HA credentials, read the saved
 // layout, write the layout files. Nothing else touches the disk.
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
+const settingsFile = () => join(app.getPath("userData"), "settings.json");
+
+function settings(): { projectRoot?: string } {
+  try { return JSON.parse(readFileSync(settingsFile(), "utf8")); } catch { return {}; }
+}
+
+const isProject = (dir?: string | null) => !!dir && existsSync(join(dir, "include", "ha_layout.json"));
 
 // The HomeMesh project folder: tools/.env and include/ha_layout.*.
-// HOMEMESH_ROOT overrides; otherwise the folder above designer/.
+// HOMEMESH_ROOT, then the folder chosen last time, then wherever the app
+// sits inside a checkout - designer/ when run from source, or
+// designer/release/ for the portable exe.
 function projectRoot(): string | null {
-  const candidates = [process.env.HOMEMESH_ROOT, resolve(app.getAppPath(), ".."), resolve(process.cwd(), "..")];
-  for (const c of candidates) {
-    if (c && existsSync(join(c, "include", "ha_layout.json"))) return c;
-  }
-  return null;
+  // A portable exe runs from a temp folder; electron-builder passes the
+  // folder the exe actually sits in.
+  const exeDir = process.env.PORTABLE_EXECUTABLE_DIR || dirname(process.execPath);
+  const candidates = [process.env.HOMEMESH_ROOT, settings().projectRoot,
+    resolve(app.getAppPath(), ".."), resolve(process.cwd(), ".."), resolve(exeDir, "..", ".."), resolve(exeDir, "..")];
+  return candidates.find(isProject) ?? null;
 }
+
+ipcMain.handle("project:choose", async () => {
+  const r = await dialog.showOpenDialog({ title: "Choose the HomeMesh project folder", properties: ["openDirectory"] });
+  const dir = r.filePaths[0];
+  if (!dir) return null;
+  if (!isProject(dir)) throw new Error("That folder has no include/ha_layout.json - choose the homemesh-panel folder.");
+  writeFileSync(settingsFile(), JSON.stringify({ ...settings(), projectRoot: dir }, null, 1));
+  return dir;
+});
 
 function readEnv(): { url?: string; token?: string } {
   const root = projectRoot();
@@ -55,6 +74,7 @@ function createWindow() {
     minHeight: 760,
     backgroundColor: "#15181c",
     title: "HomeMesh Designer",
+    icon: join(here, "..", "build", "icon.png"),
     webPreferences: { preload: join(here, "preload.cjs"), contextIsolation: true, nodeIntegration: false },
   });
   win.setMenuBarVisibility(false);

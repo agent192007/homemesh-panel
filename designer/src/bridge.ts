@@ -4,6 +4,7 @@
 export interface Bridge {
   loadEnv(): Promise<{ url?: string; token?: string }>;
   projectRoot(): Promise<string | null>;
+  chooseProject(): Promise<string | null>;
   loadLayout(): Promise<string | null>;
   saveLayout(json: string, header: string): Promise<string>;
 }
@@ -15,6 +16,7 @@ declare global {
 export const bridge: Bridge = window.homemesh ?? {
   loadEnv: async () => ({}),
   projectRoot: async () => null,
+  chooseProject: async () => null,
   loadLayout: async () => null,
   saveLayout: async () => { throw new Error("saving needs the desktop app"); },
 };
