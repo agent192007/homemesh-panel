@@ -116,3 +116,47 @@ h3 { font-size: 13px; margin: 0; }
 }
 .toast.ok { border-color: var(--ok); }
 .toast.error { border-color: var(--bad); }
+
+/* ---- app light mode: the same tokens, light values ---- */
+:root[data-theme="light"] {
+  --bg: #f3f5f8;
+  --panel: #ffffff;
+  --panel-2: #eef1f5;
+  --line: #d9dee5;
+  --text: #1b1f24;
+  --muted: #68717d;
+  --accent: #2f6feb;
+  --on: #d97706;
+  --ok: #1e9e5a;
+  --bad: #d93a3a;
+}
+:root[data-theme="light"] .sim-frame { background: #1b1f24; box-shadow: 0 10px 30px #0003, inset 0 0 0 2px #2a2f36; }
+:root[data-theme="light"] .log { background: #fbfcfd; }
+:root[data-theme="light"] .log pre { color: #3b4250; }
+:root[data-theme="light"] .toast { box-shadow: 0 6px 24px #0002; }
+
+/* ---- top bar appearance switch ---- */
+.mode { margin-left: auto; display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.mode button { border: none; border-radius: 0; background: transparent; padding: 5px 10px; color: var(--muted); }
+.mode button.active { background: var(--panel-2); color: var(--text); font-weight: 600; }
+
+/* ---- pages: room moves, editable names ---- */
+.page h3 { align-items: center; gap: 6px; }
+.page h3 .page-name { flex: 1; }
+.page h3 .count { color: var(--muted); font-weight: 400; }
+.room-move { display: flex; gap: 2px; }
+.room-move button { padding: 0 6px; line-height: 18px; font-size: 12px; }
+.name-edit { min-width: 0; padding: 2px 6px; background: transparent; border-color: transparent; }
+.name-edit:hover, .name-edit:focus { border-color: var(--line); background: var(--bg); }
+.name-edit.custom { color: var(--accent); font-weight: 600; }
+.name-edit::placeholder { color: var(--text); opacity: 0.9; }
+
+/* ---- theme presets ---- */
+.presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 12px; }
+.preset { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 6px; font-size: 12px; }
+.preset.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.preset-swatch { display: flex; gap: 3px; width: 100%; padding: 4px; border-radius: 4px; }
+.preset-swatch span { flex: 1; height: 10px; border-radius: 2px; }
+.custom-tag { color: var(--accent); align-self: center; justify-self: center; }
+
+.dirty { color: var(--on); font-size: 12px; margin-top: 6px; }

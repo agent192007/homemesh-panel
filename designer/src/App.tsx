@@ -5,11 +5,28 @@ import {
   buildHeader, buildInventory, buildLayout, dumpLayout, ICON_NAMES, Inventory, Layout,
   LAYOUT_EVENT, LAYOUT_MAX_JSON, MAX_ENTITIES, MAX_PER_PAGE, selectLayout, THEME_DEFAULTS,
 } from "./layout/format";
+import { presetOf, THEME_PRESETS } from "./layout/themes";
 import { Ev, Link, SimEvent } from "./sim/events";
 import { PanelSimulator, PanelSimulatorHandle } from "./sim/PanelSimulator";
 
 type Status = { kind: "idle" | "busy" | "ok" | "error"; text: string };
-interface Sel { include: Set<string>; favourite: Set<string>; order: string[]; icons: Record<string, string> }
+type Mode = "system" | "dark" | "light";
+interface Sel {
+  include: Set<string>; favourite: Set<string>; order: string[];
+  icons: Record<string, string>; names: Record<string, string>;
+}
+
+function selFromLayout(l: Layout): Sel {
+  return {
+    include: new Set(l.entities.map((e) => e.id)),
+    favourite: new Set(l.entities.filter((e) => e.fav).map((e) => e.id)),
+    order: l.entities.map((e) => e.id),
+    icons: Object.fromEntries(l.entities.map((e) => [e.id, e.icon])),
+    // Every saved name to start with; the ones that merely repeat HA's
+    // friendly name are dropped once the inventory arrives.
+    names: Object.fromEntries(l.entities.map((e) => [e.id, e.name])),
+  };
+}
 interface LiveState { s?: string; brightness?: number | null; rgb?: number[] | null }
 
 const THEME_LABELS: Record<string, string> = {
@@ -29,9 +46,12 @@ export default function App() {
   const [status, setStatus] = useState<Status>({ kind: "idle", text: "not connected" });
   const [client, setClient] = useState<HaClient | null>(null);
   const [inv, setInv] = useState<Inventory | null>(null);
-  const [sel, setSel] = useState<Sel>({ include: new Set(), favourite: new Set(), order: [], icons: {} });
+  const [sel, setSel] = useState<Sel>({ include: new Set(), favourite: new Set(), order: [], icons: {}, names: {} });
   const [theme, setTheme] = useState<Record<string, string>>({ ...THEME_DEFAULTS });
   const [saved, setSaved] = useState<Layout | null>(null);
+  // The layout as last written to the project, for "unsaved changes".
+  const [baseline, setBaseline] = useState<string | null>(null);
+  const [mode, setMode] = useState<Mode>(() => (localStorage.getItem("app_mode") as Mode) || "system");
   const [live, setLive] = useState(false);
   const [search, setSearch] = useState("");
   const [logs, setLogs] = useState<string[]>([]);
@@ -54,12 +74,8 @@ export default function App() {
       if (raw) {
         const l: Layout = JSON.parse(raw);
         setSaved(l);
-        setSel({
-          include: new Set(l.entities.map((e) => e.id)),
-          favourite: new Set(l.entities.filter((e) => e.fav).map((e) => e.id)),
-          order: l.entities.map((e) => e.id),
-          icons: Object.fromEntries(l.entities.map((e) => [e.id, e.icon])),
-        });
+        setBaseline(dumpLayout(l));
+        setSel(selFromLayout(l));
         setTheme({ ...THEME_DEFAULTS, ...(l.theme ?? {}) });
       }
       if (env.url && env.token) connect(env.url, env.token);
@@ -77,6 +93,9 @@ export default function App() {
         c.cmd("config/entity_registry/list"), c.cmd("config/device_registry/list"),
       ]);
       const inventory = buildInventory(states, areas, ents, devs);
+      // A saved name equal to HA's friendly name is not a custom name.
+      const friendly = new Map(inventory.controllable.map((r) => [r.id, r.name]));
+      setSel((s) => ({ ...s, names: Object.fromEntries(Object.entries(s.names).filter(([id, n]) => n !== friendly.get(id))) }));
       localStorage.setItem("ha_url", u);
       setClient(c);
       setInv(inventory);
@@ -88,12 +107,26 @@ export default function App() {
 
   // ----------------------------------------------------------- the layout
   const tables = useMemo(() => inv ? selectLayout(inv, {
-    include: sel.include, favourite: sel.favourite, automations: new Set(), order: sel.order, icons: sel.icons,
+    include: sel.include, favourite: sel.favourite, automations: new Set(), order: sel.order,
+    icons: sel.icons, names: sel.names,
   }) : null, [inv, sel]);
   const layout: Layout | null = useMemo(() => tables ? buildLayout(tables, theme) : saved, [tables, theme, saved]);
   const json = useMemo(() => (layout ? dumpLayout(layout) : ""), [layout]);
   const simJson = useDebounced(json, 250);
   const bytes = new TextEncoder().encode(json).length;
+  const dirty = baseline !== null && json !== "" && json !== baseline;
+  const preset = presetOf(theme);
+  const friendlyName = useMemo(() => new Map((inv?.controllable ?? []).map((r) => [r.id, r.name])), [inv]);
+
+  // The app's own colour scheme: follows Windows unless chosen.
+  useEffect(() => {
+    localStorage.setItem("app_mode", mode);
+    const mq = window.matchMedia("(prefers-color-scheme: light)");
+    const apply = () => { document.documentElement.dataset.theme = mode === "system" ? (mq.matches ? "light" : "dark") : mode; };
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, [mode]);
 
   // State the network task would deliver after connecting; replayed into
   // every fresh simulator instance.
@@ -169,8 +202,27 @@ export default function App() {
     if (!tables || !layout) return;
     try {
       const where = await bridge.saveLayout(json, buildHeader(tables));
+      setBaseline(json);
+      setSaved(layout);
       flash({ kind: "ok", text: `Wrote ha_layout.json and ha_layout.h in ${where}` });
     } catch (e) { flash({ kind: "error", text: (e as Error).message }); }
+  }
+  function revert() {
+    if (!saved) return;
+    const s = selFromLayout(saved);
+    setSel({ ...s, names: Object.fromEntries(Object.entries(s.names).filter(([id, n]) => n !== friendlyName.get(id))) });
+    setTheme({ ...THEME_DEFAULTS, ...(saved.theme ?? {}) });
+  }
+
+  // Move a room page up or down. Pages follow the order rooms first
+  // appear in the entity order, so this moves the room's whole block.
+  function moveRoom(areaIndex: number, delta: -1 | 1) {
+    if (!layout) return;
+    const blocks = layout.areas.map((_, i) => layout.entities.filter((e) => e.area === i).map((e) => e.id));
+    const to = areaIndex + delta;
+    if (to < 0 || to >= blocks.length) return;
+    [blocks[areaIndex], blocks[to]] = [blocks[to], blocks[areaIndex]];
+    setSel((s) => ({ ...s, order: blocks.flat() }));
   }
 
   // -------------------------------------------------------------- picker
@@ -209,6 +261,13 @@ export default function App() {
         <input className="token" type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="long-lived access token" />
         <button onClick={() => connect()}>{client ? "Reconnect" : "Connect"}</button>
         <span className={`status ${status.kind}`}>{status.text}</span>
+        <div className="mode" role="group" aria-label="App appearance">
+          {(["system", "dark", "light"] as Mode[]).map((m) => (
+            <button key={m} className={mode === m ? "active" : ""} onClick={() => setMode(m)}>
+              {m === "system" ? "Auto" : m === "dark" ? "Dark" : "Light"}
+            </button>
+          ))}
+        </div>
       </header>
 
       <main className="cols">
@@ -268,23 +327,54 @@ export default function App() {
         <section className="col side">
           <div className="card">
             <h2>Pages</h2>
-            <p className="hint">Drag to reorder within a room. A tile's position is its order on the page; Home follows the rooms.</p>
+            <p className="hint">Drag tiles to reorder within a room; arrows move a whole room. Edit a name to change what the panel shows — clear it to use Home Assistant's.</p>
             {pages.map((p, pi) => (
               <div key={p.name + pi} className="page">
-                <h3>{p.name} <span>{p.ents.length}/{MAX_PER_PAGE}</span></h3>
-                {p.ents.map((e) => (
-                  <div key={e.id} className={`tile-row ${pi === 0 ? "fixed" : ""}`} draggable={pi > 0}
-                    onDragStart={() => { dragId.current = e.id; }}
-                    onDragOver={(ev) => ev.preventDefault()} onDrop={() => dropBefore(e.id)}>
-                    <span className="grip">{pi > 0 ? "⋮⋮" : ""}</span>{e.name}<code>{e.icon}</code>
-                  </div>
-                ))}
+                <h3>
+                  <span className="page-name">{p.name}</span>
+                  {pi > 0 && (
+                    <span className="room-move">
+                      <button title="Move room earlier" disabled={pi === 1} onClick={() => moveRoom(pi - 1, -1)}>↑</button>
+                      <button title="Move room later" disabled={pi === pages.length - 1} onClick={() => moveRoom(pi - 1, 1)}>↓</button>
+                    </span>
+                  )}
+                  <span className="count">{p.ents.length}/{MAX_PER_PAGE}</span>
+                </h3>
+                {p.ents.map((e) => {
+                  const ha = friendlyName.get(e.id) ?? e.name;
+                  const custom = sel.names[e.id] !== undefined && sel.names[e.id] !== ha;
+                  return (
+                    <div key={e.id} className={`tile-row ${pi === 0 ? "fixed" : ""}`} draggable={pi > 0}
+                      onDragStart={() => { dragId.current = e.id; }}
+                      onDragOver={(ev) => ev.preventDefault()} onDrop={() => dropBefore(e.id)}>
+                      <span className="grip">{pi > 0 ? "⋮⋮" : ""}</span>
+                      <input className={`name-edit ${custom ? "custom" : ""}`} value={sel.names[e.id] ?? ""} placeholder={ha}
+                        title={custom ? `Custom name. Home Assistant calls it "${ha}".` : "Type a shorter name for the panel"}
+                        onChange={(ev) => { const v = ev.target.value; setSel((s) => ({ ...s, names: { ...s.names, [e.id]: v } })); }} />
+                      <code>{e.icon}</code>
+                    </div>
+                  );
+                })}
               </div>
             ))}
           </div>
 
           <div className="card">
             <h2>Colours</h2>
+            <div className="presets">
+              {THEME_PRESETS.map((p) => (
+                <button key={p.id} className={`preset ${preset?.id === p.id ? "active" : ""}`} title={p.name}
+                  onClick={() => setTheme({ ...p.colours })}>
+                  <span className="preset-swatch" style={{ background: p.colours.bg }}>
+                    <span style={{ background: p.colours.tile }} />
+                    <span style={{ background: p.colours.on }} />
+                    <span style={{ background: p.colours.accent }} />
+                  </span>
+                  {p.name}
+                </button>
+              ))}
+              {!preset && <span className="preset custom-tag">Custom</span>}
+            </div>
             <div className="swatches">
               {Object.keys(THEME_DEFAULTS).map((k) => (
                 <label key={k} className="swatch">
@@ -293,7 +383,6 @@ export default function App() {
                 </label>
               ))}
             </div>
-            <button className="ghost" onClick={() => setTheme({ ...THEME_DEFAULTS })}>Reset to defaults</button>
           </div>
 
           <div className="card">
@@ -308,7 +397,9 @@ export default function App() {
               ? <div className="verdict ok">✓ Accepted by the firmware's validator</div>
               : <div className="verdict bad">✗ The panel would reject this: {verdict.reason}</div>)}
             {tables?.notes.map((n) => <div key={n} className="note">{n}</div>)}
+            {dirty && <div className="dirty">● Unsaved changes — the project files still hold the previous layout.</div>}
             <div className="actions">
+              <button className="ghost" onClick={revert} disabled={!dirty}>Revert</button>
               <button onClick={save} disabled={!tables}>Save to project</button>
               <button className="primary" onClick={push} disabled={!client || !layout || verdict?.ok === false}>Push to panel</button>
             </div>
