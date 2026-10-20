@@ -248,7 +248,7 @@ async def fetch_inventory(url, token):
 
 
 def select_layout(inv, include=None, favourite=(), automations=None,
-                  order=None, icons=None, log=print):
+                  order=None, icons=None, names=None, log=print):
     """Turn a selection into the four tables a layout is made of.
 
     include     entity_ids to place, or None for everything controllable
@@ -260,11 +260,14 @@ def select_layout(inv, include=None, favourite=(), automations=None,
                 authoring tool's drag-and-drop actually edits.
 
     icons       entity_id -> icon name, overriding the domain default
+    names       entity_id -> name to show on the panel, overriding HA's
+                friendly name. Blank or whitespace means "use HA's".
 
     Returns (area_names, rows, acts, sensor_rows) where rows are
     (eid, name, kind, area_index, favourite, icon).
     """
     icons = icons or {}
+    names = names or {}
     favourite = set(favourite)
     chosen = [r for r in inv.controllable if include is None or r[0] in include]
 
@@ -305,8 +308,8 @@ def select_layout(inv, include=None, favourite=(), automations=None,
             log(f"note: {inv.area_of(area)} page is full, skipping {eid}")
             continue
         per_area[idx] += 1
-        rows.append((eid, name, kind, idx, eid in favourite,
-                     icons.get(eid) or default_icon(eid)))
+        rows.append((eid, (names.get(eid) or "").strip() or name, kind, idx,
+                     eid in favourite, icons.get(eid) or default_icon(eid)))
         if len(rows) >= MAX_ENTITIES:
             break
 

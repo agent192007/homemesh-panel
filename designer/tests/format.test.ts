@@ -20,6 +20,7 @@ const saved = JSON.parse(readFileSync(resolve(root, "include", "ha_layout.json")
 interface Case {
   name: string; include: string[] | null; favourite: string[]; automations: string[] | null;
   order: string[]; icons: Record<string, string>; theme: Record<string, string> | null;
+  names?: Record<string, string>;
 }
 const savedIds = saved.entities.map((e: any) => e.id);
 const cases: Case[] = [
@@ -31,6 +32,10 @@ const cases: Case[] = [
     theme: { ...THEME_DEFAULTS, bg: "#000000" } },
   { name: "reversed order, custom icons", include: savedIds, favourite: [], automations: [],
     order: [...savedIds].reverse(), icons: { "switch.ac": "ac" }, theme: null },
+  { name: "custom names, with quotes, backslash and blanks", include: savedIds, favourite: [], automations: [],
+    order: savedIds, icons: {}, theme: null,
+    names: { "light.living_room_rgbww_lights": "Strip", "switch.ac": 'Lamp "Big" \ 2',
+             "light.bed_light": "   ", "light.ceiling_lights": "  Ceiling  " } },
   { name: "every automation", include: savedIds.slice(0, 2), favourite: [], automations: null,
     order: [], icons: {}, theme: null },
 ];
@@ -55,7 +60,7 @@ for c in cases:
     t = hd.select_layout(inv, include=None if c["include"] is None else set(c["include"]),
                          favourite=set(c["favourite"]),
                          automations=None if c["automations"] is None else set(c["automations"]),
-                         order=c["order"], icons=c["icons"], log=lambda *a: None)
+                         order=c["order"], icons=c["icons"], names=c.get("names"), log=lambda *a: None)
     out.append({"json": hd.dump_layout(hd.build_layout(*t, theme=c["theme"])), "header": hd.build_header(*t)})
 print(json.dumps(out))
 `;
@@ -68,6 +73,7 @@ cases.forEach((c, i) => {
   const t = selectLayout(inv, {
     include: c.include === null ? null : new Set(c.include), favourite: new Set(c.favourite),
     automations: c.automations === null ? null : new Set(c.automations), order: c.order, icons: c.icons,
+    names: c.names,
   });
   const json = dumpLayout(buildLayout(t, c.theme ?? undefined));
   const header = buildHeader(t);

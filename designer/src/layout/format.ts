@@ -149,6 +149,8 @@ export interface Selection {
   automations: Set<string> | null;
   order: string[];
   icons: Record<string, string>;
+  // entity_id -> name shown on the panel; blank means HA's friendly name.
+  names?: Record<string, string>;
 }
 
 // Port of select_layout(). Notes are what the Python logs.
@@ -177,7 +179,8 @@ export function selectLayout(inv: Inventory, sel: Selection): Tables {
     const n = perArea.get(idx) ?? 0;
     if (n >= MAX_PER_PAGE) { notes.push(`${inv.areaName[r.area]} page is full, skipping ${r.id}`); continue; }
     perArea.set(idx, n + 1);
-    rows.push([r.id, r.name, r.kind, idx, sel.favourite.has(r.id), sel.icons[r.id] || defaultIcon(r.id)]);
+    const name = (sel.names?.[r.id] ?? "").trim() || r.name;
+    rows.push([r.id, name, r.kind, idx, sel.favourite.has(r.id), sel.icons[r.id] || defaultIcon(r.id)]);
     if (rows.length >= MAX_ENTITIES) break;
   }
   const nFav = rows.filter((r) => r[4]).length;

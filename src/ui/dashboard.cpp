@@ -141,6 +141,14 @@ static void set_enabled(lv_obj_t *obj, bool en) {
   else lv_obj_add_state(obj, LV_STATE_DISABLED);
 }
 
+// Move a colour away from its own brightness: lighter if it is dark,
+// darker if it is light. Lightening a white tile leaves it white, so on a
+// light theme the ON lift and the top edge vanished; darkening by half the
+// level reads as the same step on a pale surface.
+static lv_color_t shade(lv_color_t c, lv_opa_t lvl) {
+  return lv_color_brightness(c) > 160 ? lv_color_darken(c, lvl / 2) : lv_color_lighten(c, lvl);
+}
+
 static void style_card(lv_obj_t *o) {
   lv_obj_set_style_radius(o, CARD_RADIUS, 0);
   lv_obj_set_style_shadow_width(o, 0, 0);
@@ -148,7 +156,7 @@ static void style_card(lv_obj_t *o) {
   // A 1px lit top edge, which is what actually sells the raised look.
   // A drop shadow would do it too and cost a blur pass per tile.
   lv_obj_set_style_border_width(o, 1, 0);
-  lv_obj_set_style_border_color(o, lv_color_lighten(COL_TILE, CARD_EDGE), 0);
+  lv_obj_set_style_border_color(o, shade(COL_TILE, CARD_EDGE), 0);
   lv_obj_set_style_border_side(o, LV_BORDER_SIDE_TOP, 0);
   lv_obj_set_style_opa(o, LV_OPA_40, LV_STATE_DISABLED);
 }
@@ -459,6 +467,9 @@ static void create_detail() {
   lv_obj_add_event_cb(close, close_detail_cb, LV_EVENT_CLICKED, NULL);
   lv_obj_t *cl = lv_label_create(close);
   lv_label_set_text(cl, LV_SYMBOL_CLOSE);
+  // Explicit, not inherited: LVGL's default theme gives button labels
+  // white text, which vanished on a light theme's white button.
+  lv_obj_set_style_text_color(cl, COL_TEXT, 0);
   lv_obj_center(cl);
 
   dp_btn = lv_btn_create(p);
@@ -509,8 +520,13 @@ static void create_device_tile(lv_obj_t *parent, uint8_t i,
   // reading says the same thing and leaves the page legible. The
   // detail panel still floods its single big button, where loud is
   // the right answer.
-  lv_obj_set_style_bg_color(t, lv_color_lighten(COL_TILE, CARD_LIFT), LV_STATE_CHECKED);
+  lv_obj_set_style_bg_color(t, shade(COL_TILE, CARD_LIFT), LV_STATE_CHECKED);
+  // Both states. LVGL's default theme turns a checked button's text
+  // white, so with only the default state set, an ON tile's name
+  // disappeared on a light theme - invisible on dark ones, where the
+  // theme's white and COL_TEXT happen to agree.
   lv_obj_set_style_text_color(t, COL_TEXT, 0);
+  lv_obj_set_style_text_color(t, COL_TEXT, LV_STATE_CHECKED);
   lv_obj_add_event_cb(t, toggle_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
 
   // The device icon, in what used to be dead space in the middle of
@@ -532,13 +548,25 @@ static void create_device_tile(lv_obj_t *parent, uint8_t i,
   // Padded in every state, so the glyph does not shift when the disc
   // appears - only the disc does.
   lv_obj_set_style_pad_all(ic, roomy ? 5 : 2, 0);
-  lv_obj_align(ic, LV_ALIGN_LEFT_MID, 0, roomy ? 2 : 0);
+  // Roomy tiles (78 px of content) stack name / icon / reading; the -2
+  // keeps the 38 px disc clear of the reading below it. Compact tiles
+  // (44 px) have no row to spare, so the icon sits inline before the
+  // name instead of colliding with both.
+  if (roomy) lv_obj_align(ic, LV_ALIGN_LEFT_MID, 0, -2);
+  else lv_obj_align(ic, LV_ALIGN_TOP_LEFT, 0, -3);
 
+  // One line, cut with "..." - which needs a height as well as a width.
+  // With only a width LVGL wraps instead, and a second line of a long
+  // name ran down into the icon ("Ceiling Lights", "Living Room RGBWW
+  // Lights"). Found by the designer's simulator on 20 Oct. The designer
+  // can give a device a shorter name to avoid the dots.
   lv_obj_t *name = lv_label_create(t);
   lv_label_set_text(name, d->name);
-  lv_obj_set_width(name, w - (has_extras(d) ? 54 : 22));
+  const lv_coord_t name_x = roomy ? 0 : 26;
+  lv_obj_set_size(name, w - (has_extras(d) ? 54 : 22) - name_x,
+                  lv_font_get_line_height(lv_obj_get_style_text_font(name, LV_PART_MAIN)));
   lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
-  lv_obj_align(name, LV_ALIGN_TOP_LEFT, 0, 0);
+  lv_obj_align(name, LV_ALIGN_TOP_LEFT, name_x, 0);
 
   lv_obj_t *st = lv_label_create(t);
   lv_obj_set_style_text_font(st, roomy ? &lv_font_montserrat_20
