@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { bridge } from "./bridge";
 import { HaClient } from "./ha/haClient";
 import {
-  buildHeader, buildInventory, buildLayout, dumpLayout, Inventory, Layout,
-  LAYOUT_EVENT, LAYOUT_MAX_JSON, MAX_AUTOMATIONS, MAX_ENTITIES, MAX_PER_PAGE, selectLayout, THEME_DEFAULTS,
+  buildHeader, buildInventory, buildLayout, dumpLayout, Inventory, Layout, LAYOUT_EVENT, LAYOUT_MAX_JSON,
+  MAX_AREAS, MAX_AUTOMATIONS, MAX_ENTITIES, MAX_PER_PAGE, pageOf, selectLayout, sensorPageOf, THEME_DEFAULTS,
 } from "./layout/format";
 import { presetOf, THEME_PRESETS } from "./layout/themes";
 import { Glyph, IconPicker } from "./IconPicker";
@@ -17,6 +17,11 @@ interface Sel {
   include: Set<string>; favourite: Set<string>; order: string[];
   icons: Record<string, string>; names: Record<string, string>;
   automations: Set<string>;   // scenes, scripts, automations on the Automations screen
+  // Page overrides: a page is only a name to the panel. Absent means the
+  // device's (or sensor's) HA room; a sensor set to "" is hidden.
+  pages: Record<string, string>;
+  sensorPages: Record<string, string>;
+  extraPages: string[];       // pages made here that have no device yet
 }
 
 function selFromLayout(l: Layout): Sel {
@@ -25,10 +30,35 @@ function selFromLayout(l: Layout): Sel {
     favourite: new Set(l.entities.filter((e) => e.fav).map((e) => e.id)),
     order: l.entities.map((e) => e.id),
     icons: Object.fromEntries(l.entities.map((e) => [e.id, e.icon])),
-    // Every saved name to start with; the ones that merely repeat HA's
-    // friendly name are dropped once the inventory arrives.
+    // Every saved name and page to start with; the ones that merely
+    // repeat what HA says are dropped once the inventory arrives.
     names: Object.fromEntries(l.entities.map((e) => [e.id, e.name])),
     automations: new Set(l.actions.map((a) => a.id)),
+    pages: Object.fromEntries(l.entities.map((e) => [e.id, l.areas[e.area]])),
+    sensorPages: Object.fromEntries(l.sensors.map((s) => [s.id, l.areas[s.area]])),
+    extraPages: [],
+  };
+}
+
+// Once HA's inventory is known: keep only what differs from it, so a
+// saved layout comes back as the same choices rather than as pins.
+function normalise(s: Sel, inv: Inventory, saved: Layout | null): Sel {
+  const friendly = new Map(inv.controllable.map((r) => [r.id, r.name]));
+  const room = new Map(inv.controllable.map((r) => [r.id, r.area !== null ? inv.areaName[r.area] : null]));
+  const pages = Object.fromEntries(Object.entries(s.pages).filter(([id, p]) => p !== room.get(id)));
+  const sensorPages: Record<string, string> = {};
+  for (const sn of inv.sensors) {
+    const haRoom = sn.area !== null ? inv.areaName[sn.area] : null;
+    if (sn.id in s.sensorPages) {
+      if (s.sensorPages[sn.id] !== haRoom) sensorPages[sn.id] = s.sensorPages[sn.id];
+    } else if (saved && haRoom && saved.areas.includes(haRoom)) {
+      // Its room is a page but the saved layout did not show it: hidden.
+      sensorPages[sn.id] = "";
+    }
+  }
+  return {
+    ...s, pages, sensorPages,
+    names: Object.fromEntries(Object.entries(s.names).filter(([id, n]) => n !== friendly.get(id))),
   };
 }
 interface LiveState { s?: string; brightness?: number | null; rgb?: number[] | null }
@@ -50,7 +80,9 @@ export default function App() {
   const [status, setStatus] = useState<Status>({ kind: "idle", text: "not connected" });
   const [client, setClient] = useState<HaClient | null>(null);
   const [inv, setInv] = useState<Inventory | null>(null);
-  const [sel, setSel] = useState<Sel>({ include: new Set(), favourite: new Set(), order: [], icons: {}, names: {}, automations: new Set() });
+  const [sel, setSel] = useState<Sel>({ include: new Set(), favourite: new Set(), order: [], icons: {}, names: {},
+    automations: new Set(), pages: {}, sensorPages: {}, extraPages: [] });
+  const [newPage, setNewPage] = useState("");
   const [theme, setTheme] = useState<Record<string, string>>({ ...THEME_DEFAULTS });
   const [saved, setSaved] = useState<Layout | null>(null);
   // The layout as last written to the project, for "unsaved changes".
@@ -65,6 +97,7 @@ export default function App() {
   const sim = useRef<PanelSimulatorHandle>(null);
   const liveStates = useRef<Map<string, LiveState>>(new Map());
   const designStates = useRef<Map<number, SimEvent[]>>(new Map());
+  const savedRef = useRef<Layout | null>(null);
 
   const log = useCallback((line: string) => setLogs((l) => [...l.slice(-300), line]), []);
   const flash = (s: Status) => { setToast(s); setTimeout(() => setToast(null), 4000); };
@@ -80,6 +113,7 @@ export default function App() {
       if (raw) {
         const l: Layout = JSON.parse(raw);
         setSaved(l);
+        savedRef.current = l;
         setBaseline(dumpLayout(l));
         setSel(selFromLayout(l));
         setTheme({ ...THEME_DEFAULTS, ...(l.theme ?? {}) });
@@ -99,9 +133,8 @@ export default function App() {
         c.cmd("config/entity_registry/list"), c.cmd("config/device_registry/list"),
       ]);
       const inventory = buildInventory(states, areas, ents, devs);
-      // A saved name equal to HA's friendly name is not a custom name.
-      const friendly = new Map(inventory.controllable.map((r) => [r.id, r.name]));
-      setSel((s) => ({ ...s, names: Object.fromEntries(Object.entries(s.names).filter(([id, n]) => n !== friendly.get(id))) }));
+      // A saved name or page equal to what HA says is not a choice.
+      setSel((s) => normalise(s, inventory, savedRef.current));
       localStorage.setItem("ha_url", u);
       setClient(c);
       setInv(inventory);
@@ -114,7 +147,7 @@ export default function App() {
   // ----------------------------------------------------------- the layout
   const tables = useMemo(() => inv ? selectLayout(inv, {
     include: sel.include, favourite: sel.favourite, automations: sel.automations, order: sel.order,
-    icons: sel.icons, names: sel.names,
+    icons: sel.icons, names: sel.names, pages: sel.pages, sensorPages: sel.sensorPages,
   }) : null, [inv, sel]);
   const layout: Layout | null = useMemo(() => tables ? buildLayout(tables, theme) : saved, [tables, theme, saved]);
   const json = useMemo(() => (layout ? dumpLayout(layout) : ""), [layout]);
@@ -220,13 +253,14 @@ export default function App() {
       const where = await bridge.saveLayout(json, buildHeader(tables));
       setBaseline(json);
       setSaved(layout);
+      savedRef.current = layout;
       flash({ kind: "ok", text: `Wrote ha_layout.json and ha_layout.h in ${where}` });
     } catch (e) { flash({ kind: "error", text: (e as Error).message }); }
   }
   function revert() {
     if (!saved) return;
     const s = selFromLayout(saved);
-    setSel({ ...s, names: Object.fromEntries(Object.entries(s.names).filter(([id, n]) => n !== friendlyName.get(id))) });
+    setSel(inv ? normalise(s, inv, saved) : s);
     setTheme({ ...THEME_DEFAULTS, ...(saved.theme ?? {}) });
   }
 
@@ -239,6 +273,81 @@ export default function App() {
     if (to < 0 || to >= blocks.length) return;
     [blocks[areaIndex], blocks[to]] = [blocks[to], blocks[areaIndex]];
     setSel((s) => ({ ...s, order: blocks.flat() }));
+  }
+
+  // --------------------------------------------------------------- pages
+  // A page is only a name to the panel: a device's page is its override,
+  // else its HA room. These keep the override map minimal, so a device
+  // put back in its own room carries no override.
+  const haRoom = useMemo(() => new Map([
+    ...(inv?.controllable ?? []).map((r) => [r.id, r.area !== null ? inv!.areaName[r.area] : null] as const),
+    ...(inv?.sensors ?? []).map((r) => [r.id, r.area !== null ? inv!.areaName[r.area] : null] as const),
+  ]), [inv]);
+  const haRoomNames = useMemo(() => new Set(Object.values(inv?.areaName ?? {})), [inv]);
+  const deviceArea = (id: string) => inv?.controllable.find((r) => r.id === id)?.area ?? null;
+  const pageOfDevice = (id: string) => (inv ? pageOf(inv, sel, id, deviceArea(id)) : null);
+
+  function withPage(s: Sel, id: string, page: string): Sel {
+    const pages = { ...s.pages };
+    if (!page || page === haRoom.get(id)) delete pages[id]; else pages[id] = page;
+    // A page made here stays until removed, even once it is emptied.
+    return { ...s, pages };
+  }
+  function setSensorPage(id: string, page: string) {
+    setSel((s) => {
+      const sensorPages = { ...s.sensorPages };
+      const room = haRoom.get(id) ?? null;
+      if (page === (room ?? "")) delete sensorPages[id]; else sensorPages[id] = page;
+      return { ...s, sensorPages };
+    });
+  }
+  function renamePage(from: string, to: string) {
+    to = to.trim();
+    if (!to || to === from) return;
+    setSel((s) => {
+      let n: Sel = { ...s, extraPages: s.extraPages.map((p) => (p === from ? to : p)) };
+      for (const r of inv?.controllable ?? []) if (pageOf(inv!, s, r.id, r.area) === from) n = withPage(n, r.id, to);
+      const sensorPages = { ...n.sensorPages };
+      for (const sn of inv?.sensors ?? []) {
+        if (sensorPageOf(inv!, s, sn) !== from) continue;
+        if (to === haRoom.get(sn.id)) delete sensorPages[sn.id]; else sensorPages[sn.id] = to;
+      }
+      return { ...n, sensorPages };
+    });
+  }
+  // Only pages that are not HA rooms can be removed; their devices go back
+  // to their own rooms, or off the panel if they have none.
+  function removePage(name: string) {
+    setSel((s) => ({
+      ...s,
+      extraPages: s.extraPages.filter((p) => p !== name),
+      pages: Object.fromEntries(Object.entries(s.pages).filter(([, p]) => p !== name)),
+      sensorPages: Object.fromEntries(Object.entries(s.sensorPages).filter(([, p]) => p !== name)),
+    }));
+  }
+  const pageNameProblem = (name: string, except?: string): string | null => {
+    const n = name.trim();
+    if (!n) return "Give the page a name";
+    if (n === "Home" || n === "Automations") return `"${n}" is already a screen on the panel`;
+    if (n !== except && [...(layout?.areas ?? []), ...sel.extraPages].includes(n)) return "There is already a page with that name";
+    const missing = fitName(n).missing;
+    if (missing.length) return `The panel's font has no ${missing.map((m) => `"${m}"`).join(" ")}`;
+    return null;
+  };
+  function addPage() {
+    const n = newPage.trim();
+    if (pageNameProblem(n)) return;
+    setSel((s) => ({ ...s, extraPages: [...s.extraPages, n] }));
+    setNewPage("");
+  }
+  // Header room for a page title: the title has no width limit on the
+  // panel, so a long one runs into the sensor reading (create_header()).
+  function titleProblem(name: string, hasSensors: boolean): string | null {
+    const w = sim.current?.textWidth(name, 20);
+    if (w == null) return null;
+    const room = hasSensors ? 282 - (sim.current?.textWidth("88.8°C  88%", 14) ?? 80) : 288;
+    if (w <= room) return null;
+    return hasSensors ? "Too long for the header: it will run into the temperature" : "Too long for the header: it will run off the screen";
   }
 
   // -------------------------------------------------------------- picker
@@ -254,19 +363,41 @@ export default function App() {
   }, [inv, search]);
 
   const toggle = (set: Set<string>, id: string) => { const n = new Set(set); n.has(id) ? n.delete(id) : n.add(id); return n; };
-  const pages = layout ? [{ name: "Home", ents: layout.entities.filter((e) => e.fav) }, ...layout.areas.map((a, i) => ({ name: a, ents: layout.entities.filter((e) => e.area === i) }))] : [];
+  const pages = layout ? [
+    { name: "Home", ents: layout.entities.filter((e) => e.fav), area: -1 },
+    ...layout.areas.map((a, i) => ({ name: a, ents: layout.entities.filter((e) => e.area === i), area: i })),
+    ...sel.extraPages.filter((p) => !layout.areas.includes(p)).map((p) => ({ name: p, ents: [] as Layout["entities"], area: -1 })),
+  ] : [];
+  const pageCount = pages.length - 1;
+  // Every page a device can be put on: the layout's, the ones made here,
+  // and every HA room.
+  const pageChoices = useMemo(() => [...new Set([...(layout?.areas ?? []), ...sel.extraPages,
+    ...[...haRoomNames].sort()])], [layout, sel.extraPages, haRoomNames]);
 
-  // Drag within a room page: tile position is order within the page.
+  // Drag on the Pages card: within a page it reorders (tile position is
+  // order within the page); onto another page it moves the device there.
   const dragId = useRef<string | null>(null);
   const dropBefore = (targetId: string) => {
     const from = dragId.current;
     dragId.current = null;
     if (!from || from === targetId || !layout) return;
-    const area = (id: string) => layout.entities.find((e) => e.id === id)?.area;
-    if (area(from) !== area(targetId)) return;
     const order = layout.entities.map((e) => e.id).filter((id) => id !== from);
     order.splice(order.indexOf(targetId), 0, from);
-    setSel((s) => ({ ...s, order }));
+    const target = pageOfDevice(targetId);
+    setSel((s) => {
+      const n = target && target !== pageOfDevice(from) ? withPage(s, from, target) : s;
+      return { ...n, order };
+    });
+  };
+  const dropOnPage = (page: string) => {
+    const from = dragId.current;
+    dragId.current = null;
+    if (!from || !layout || pageOfDevice(from) === page) return;
+    // After the page's last tile, or at the end for an empty page.
+    const order = layout.entities.map((e) => e.id).filter((id) => id !== from);
+    const last = [...order].reverse().find((id) => pageOfDevice(id) === page);
+    order.splice(last ? order.indexOf(last) + 1 : order.length, 0, from);
+    setSel((s) => ({ ...withPage(s, from, page), order }));
   };
 
   return (
@@ -295,25 +426,54 @@ export default function App() {
           {!inv && <p className="hint">Connect to Home Assistant to choose what the panel shows. Until then the simulator runs the saved layout.</p>}
           {groups.map((g) => (
             <div key={g.area} className="group">
-              <h3>{g.name}{!g.area && <em> · no room in HA, cannot be placed</em>}</h3>
+              <h3>{g.name}{!g.area && <em className="soft"> · no room in HA — choose a page to place one</em>}</h3>
               {g.rows.map((r) => {
                 const on = sel.include.has(r.id);
+                const page = pageOfDevice(r.id);
+                const needsPage = on && !page;
                 return (
-                  <div key={r.id} className={`ent ${on ? "on" : ""} ${g.area ? "" : "disabled"}`}>
-                    <input type="checkbox" checked={on} disabled={!g.area || (!on && sel.include.size >= MAX_ENTITIES)}
+                  <div key={r.id} className={`ent ${on ? "on" : ""}`}>
+                    <input type="checkbox" checked={on} disabled={!on && sel.include.size >= MAX_ENTITIES}
                       title={!on && sel.include.size >= MAX_ENTITIES ? `The panel holds ${MAX_ENTITIES} devices` : undefined}
                       onChange={() => setSel((s) => ({ ...s, include: toggle(s.include, r.id), order: s.order.includes(r.id) ? s.order : [...s.order, r.id] }))} />
-                    <button className={`star ${sel.favourite.has(r.id) ? "fav" : ""}`} title="Show on the Home page" disabled={!g.area}
+                    <button className={`star ${sel.favourite.has(r.id) ? "fav" : ""}`} title="Show on the Home page"
                       onClick={() => setSel((s) => ({ ...s, favourite: toggle(s.favourite, r.id) }))}>★</button>
-                    <div className="ent-name"><div>{r.name}</div><code>{r.id}</code></div>
-                    <span className={`kind ${r.kind}`}>{r.kind}</span>
-                    <IconPicker entityId={r.id} value={sel.icons[r.id] ?? ""} disabled={!g.area}
+                    <div className="ent-name"><div>{r.name}</div><code>{r.id} · <span className={`kind ${r.kind}`}>{r.kind}</span></code></div>
+                    <select className={`page-pick ${needsPage ? "needs" : ""} ${sel.pages[r.id] ? "custom" : ""}`} value={page ?? ""}
+                      title={sel.pages[r.id] ? `Moved here. Its room in Home Assistant: ${haRoom.get(r.id) ?? "none"}` : "The page this device goes on"}
+                      onChange={(e) => { const v = e.target.value; setSel((s) => withPage(s, r.id, v)); }}>
+                      {!page && <option value="">Choose page…</option>}
+                      {pageChoices.map((p) => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                    <IconPicker entityId={r.id} value={sel.icons[r.id] ?? ""}
                       onChange={(icon) => setSel((s) => ({ ...s, icons: { ...s.icons, [r.id]: icon } }))} />
                   </div>
                 );
               })}
             </div>
           ))}
+          {inv && inv.sensors.length > 0 && (
+            <div className="group">
+              <h3>Header sensors <em className="soft">· one temperature and one humidity per page</em></h3>
+              {inv.sensors.map((sn) => {
+                const page = sensorPageOf(inv, sel, sn);
+                const shown = layout?.sensors.some((x) => x.id === sn.id);
+                return (
+                  <div key={sn.id} className="ent sensor-row">
+                    <div className="ent-name">
+                      <div>{sn.name}</div>
+                      <code>{sn.id} · {sn.deviceClass}{page && !shown ? ` · not used: ${page} has another ${sn.deviceClass} sensor, or no devices` : ""}</code>
+                    </div>
+                    <select className={`page-pick ${sn.id in sel.sensorPages ? "custom" : ""}`} value={page ?? ""}
+                      onChange={(e) => setSensorPage(sn.id, e.target.value)}>
+                      <option value="">Not shown</option>
+                      {pageChoices.map((p) => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {inv && (
             <div className="group autos">
               <h3>Automations screen <em className="soft">· swipe up on the panel · {sel.automations.size}/{MAX_AUTOMATIONS}</em></h3>
@@ -355,19 +515,31 @@ export default function App() {
         <section className="col side">
           <div className="card">
             <h2>Pages</h2>
-            <p className="hint">Drag tiles to reorder within a room; arrows move a whole room. Edit a name to change what the panel shows — clear it to use Home Assistant's.</p>
-            {pages.map((p, pi) => (
-              <div key={p.name + pi} className="page">
-                <h3>
-                  <span className="page-name">{p.name}</span>
-                  {pi > 0 && (
+            <p className="hint">Drag tiles to reorder, or onto another page to move them; arrows move a whole page. Click a page or device name to rename it — clear a device's name to use Home Assistant's.</p>
+            {pages.map((p, pi) => {
+              const custom = pi > 0 && !haRoomNames.has(p.name);
+              const title = pi > 0 ? titleProblem(p.name, layout?.sensors.some((s) => s.area === p.area) ?? false) : null;
+              return (
+              <div key={p.name + pi} className="page" onDragOver={(ev) => { if (pi > 0) ev.preventDefault(); }}
+                onDrop={(ev) => { if (pi > 0 && ev.target === ev.currentTarget) dropOnPage(p.name); }}>
+                <h3 onDragOver={(ev) => { if (pi > 0) ev.preventDefault(); }} onDrop={() => { if (pi > 0) dropOnPage(p.name); }}>
+                  {pi === 0
+                    ? <span className="page-name">{p.name}</span>
+                    : <input key={p.name} className={`page-name page-edit ${custom ? "custom" : ""}`} defaultValue={p.name}
+                        title={custom ? "A page made here" : "A room in Home Assistant — rename it for the panel"}
+                        onKeyDown={(ev) => { if (ev.key === "Enter") ev.currentTarget.blur(); if (ev.key === "Escape") { ev.currentTarget.value = p.name; ev.currentTarget.blur(); } }}
+                        onBlur={(ev) => { const v = ev.currentTarget.value; if (pageNameProblem(v, p.name)) ev.currentTarget.value = p.name; else renamePage(p.name, v); }} />}
+                  {pi > 0 && p.area >= 0 && (
                     <span className="room-move">
-                      <button title="Move room earlier" disabled={pi === 1} onClick={() => moveRoom(pi - 1, -1)}>↑</button>
-                      <button title="Move room later" disabled={pi === pages.length - 1} onClick={() => moveRoom(pi - 1, 1)}>↓</button>
+                      <button title="Move page earlier" disabled={p.area === 0} onClick={() => moveRoom(p.area, -1)}>↑</button>
+                      <button title="Move page later" disabled={p.area === (layout?.areas.length ?? 0) - 1} onClick={() => moveRoom(p.area, 1)}>↓</button>
                     </span>
                   )}
                   <span className="count">{p.ents.length}/{MAX_PER_PAGE}</span>
+                  {custom && <button className="ghost small remove-page" title="Remove this page; its devices go back to their own rooms" onClick={() => removePage(p.name)}>✕</button>}
                 </h3>
+                {title && <div className="fit-note page-note">{title}</div>}
+                {p.ents.length === 0 && <div className="empty-page">Empty — choose this page for a device on the left, or drag a tile here. Empty pages are not sent to the panel.</div>}
                 {p.ents.map((e) => {
                   const ha = friendlyName.get(e.id) ?? e.name;
                   const custom = sel.names[e.id] !== undefined && sel.names[e.id] !== ha;
@@ -396,7 +568,21 @@ export default function App() {
                   );
                 })}
               </div>
-            ))}
+              );
+            })}
+            {inv && (() => {
+              const problem = newPage.trim() ? pageNameProblem(newPage) : null;
+              const full = pageCount >= MAX_AREAS;
+              return (
+                <div className="add-page">
+                  <input value={newPage} placeholder={full ? `The panel holds ${MAX_AREAS} pages besides Home` : "New page name"}
+                    disabled={full} onChange={(e) => setNewPage(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") addPage(); }} />
+                  <button onClick={addPage} disabled={full || !newPage.trim() || !!problem}>Add page</button>
+                  {problem && <div className="fit-note bad-text">{problem}</div>}
+                </div>
+              );
+            })()}
           </div>
 
           <div className="card">
@@ -431,7 +617,7 @@ export default function App() {
             <div className="facts">
               <span>{bytes} / {LAYOUT_MAX_JSON} bytes</span>
               <span>{layout?.entities.length ?? 0} / {MAX_ENTITIES} entities</span>
-              <span>{layout?.areas.length ?? 0} rooms</span>
+              <span>{layout?.areas.length ?? 0} / {MAX_AREAS} pages</span>
             </div>
             {verdict && (verdict.ok
               ? <div className="verdict ok">✓ Accepted by the firmware's validator</div>

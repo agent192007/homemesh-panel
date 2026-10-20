@@ -16,6 +16,9 @@ export interface PanelSimulatorHandle {
   // LVGL's own one-line LONG_DOT cut of `text` in `width` px, or null
   // before the simulator is up. See sim_fit_label().
   fitLabel(text: string, width: number): string | null;
+  // Pixel width of one line in the panel's 14 or 20 px font, or null
+  // before the simulator is up. See sim_text_width().
+  textWidth(text: string, px: 14 | 20): number | null;
 }
 
 interface Props {
@@ -48,6 +51,16 @@ export const PanelSimulator = forwardRef<PanelSimulatorHandle, Props>(function P
       const out = m.UTF8ToString(m._sim_fit_label(p, width));
       m._free(p);
       return out;
+    },
+    textWidth(text, px) {
+      const m = sim.current;
+      if (!m) return null;
+      const n = m.lengthBytesUTF8(text) + 1;
+      const p = m._malloc(n);
+      m.stringToUTF8(text, p, n);
+      const w = m._sim_text_width(p, px);
+      m._free(p);
+      return w;
     },
   }), []);
 

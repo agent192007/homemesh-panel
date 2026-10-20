@@ -151,6 +151,25 @@ export interface Selection {
   icons: Record<string, string>;
   // entity_id -> name shown on the panel; blank means HA's friendly name.
   names?: Record<string, string>;
+  // entity_id -> page name, overriding its HA area; blank means its area.
+  // A page is only a name to the panel, so this places devices with no
+  // area and makes pages that are not HA areas.
+  pages?: Record<string, string>;
+  // sensor entity_id -> page; "" hides it. Placed sensors win over ones
+  // that are only in the page's area.
+  sensorPages?: Record<string, string>;
+}
+
+// The page a device goes on: its override, else its HA area's name.
+export function pageOf(inv: Inventory, sel: Pick<Selection, "pages">, id: string, area: string | null): string | null {
+  const p = (sel.pages?.[id] ?? "").trim();
+  if (p) return p;
+  return area !== null && area in inv.areaName ? inv.areaName[area] : null;
+}
+
+export function sensorPageOf(inv: Inventory, sel: Pick<Selection, "sensorPages">, s: Sensor): string | null {
+  if (sel.sensorPages && s.id in sel.sensorPages) return sel.sensorPages[s.id].trim() || null;
+  return s.area !== null && s.area in inv.areaName ? inv.areaName[s.area] : null;
 }
 
 // Port of select_layout(). Notes are what the Python logs.
@@ -162,22 +181,26 @@ export function selectLayout(inv: Inventory, sel: Selection): Tables {
     // Stable: unranked keep their relative order after the ranked ones.
     chosen = [...chosen].sort((a, b) => (rank.get(a.id) ?? rank.size) - (rank.get(b.id) ?? rank.size));
   }
+  // Pages by name, in first-seen order.
   const usedAreas: string[] = [];
   const dropped: string[] = [];
   for (const r of chosen) {
-    if (r.area === null) dropped.push(r.id);
-    else if (!usedAreas.includes(r.area)) usedAreas.push(r.area);
+    const page = pageOf(inv, sel, r.id, r.area);
+    if (page === null) dropped.push(r.id);
+    else if (!usedAreas.includes(page)) usedAreas.push(page);
   }
-  if (dropped.length) notes.push(`${dropped.length} entity(ies) have no area in HA and cannot be placed`);
+  if (dropped.length) notes.push(`${dropped.length} selected device(s) have no room in HA — choose a page for them`);
+  if (usedAreas.length > MAX_AREAS) notes.push(`the panel holds ${MAX_AREAS} pages besides Home; ${usedAreas.slice(MAX_AREAS).join(", ")} will not appear`);
   const areas = usedAreas.slice(0, MAX_AREAS);
 
   const rows: Row[] = [];
   const perArea = new Map<number, number>();
   for (const r of chosen) {
-    if (r.area === null || !areas.includes(r.area)) continue;
-    const idx = areas.indexOf(r.area);
+    const page = pageOf(inv, sel, r.id, r.area);
+    if (page === null || !areas.includes(page)) continue;
+    const idx = areas.indexOf(page);
     const n = perArea.get(idx) ?? 0;
-    if (n >= MAX_PER_PAGE) { notes.push(`${inv.areaName[r.area]} page is full, skipping ${r.id}`); continue; }
+    if (n >= MAX_PER_PAGE) { notes.push(`${page} page is full, skipping ${r.id}`); continue; }
     perArea.set(idx, n + 1);
     const name = (sel.names?.[r.id] ?? "").trim() || r.name;
     rows.push([r.id, name, r.kind, idx, sel.favourite.has(r.id), sel.icons[r.id] || defaultIcon(r.id)]);
@@ -185,7 +208,7 @@ export function selectLayout(inv: Inventory, sel: Selection): Tables {
   }
   // Python stops here silently; the designer says so. Notes are not part
   // of the output, so the tables stay identical to the reference.
-  const placeable = chosen.filter((r) => r.area !== null && areas.includes(r.area)).length;
+  const placeable = chosen.filter((r) => { const p = pageOf(inv, sel, r.id, r.area); return p !== null && areas.includes(p); }).length;
   if (placeable > MAX_ENTITIES) notes.push(`the panel holds ${MAX_ENTITIES} devices; ${placeable - MAX_ENTITIES} more are selected and will not appear`);
   const nFav = rows.filter((r) => r[4]).length;
   if (nFav > MAX_PER_PAGE) notes.push(`${nFav} favourites but the Home page holds ${MAX_PER_PAGE}`);
@@ -196,13 +219,14 @@ export function selectLayout(inv: Inventory, sel: Selection): Tables {
     .map((a) => [a.id, a.name] as [string, string]);
 
   const sensorRows: SensorRow[] = [];
-  areas.forEach((area, idx) => {
+  areas.forEach((page, idx) => {
     for (const dc of ["temperature", "humidity"]) {
-      const m = inv.sensors.find((s) => s.area === area && s.deviceClass === dc);
+      const fits = inv.sensors.filter((s) => s.deviceClass === dc && sensorPageOf(inv, sel, s) === page);
+      const m = fits.find((s) => sel.sensorPages !== undefined && s.id in sel.sensorPages) ?? fits[0];
       if (m) sensorRows.push([m.id, idx, dc === "humidity"]);
     }
   });
-  return { areaNames: areas.map((a) => inv.areaName[a]), rows, acts, sensorRows, notes };
+  return { areaNames: [...areas], rows, acts, sensorRows, notes };
 }
 
 export function buildLayout(t: Tables, theme?: Record<string, string>): Layout {

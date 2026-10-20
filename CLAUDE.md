@@ -53,9 +53,13 @@ on (brightness 102), then off. See `designer/README.md`.
   ASCII and °) are flagged; LVGL drops those silently.
 
 **Firmware changed after `v0.4-firmware-freeze` — at the user's request
-("fix the text overflowing"), 20 Oct — and is NOT yet on the board** (no
-serial port while it was done). Verified in the simulator, which runs
-this exact `dashboard.cpp`, and by building all three envs:
+("fix the text overflowing"), 20 Oct — and is flashed** (20 Oct evening,
+`pio run -e ha -t upload` on COM6, app only so the pushed layout stayed).
+The boot log matched the healthy one: 15,408 B pool free, 8,220 B stack
+free, 7 entities in one 2,403-byte frame. Not yet looked at by eye on
+the screen: long names and the Daylight theme. Verified before that in
+the simulator, which runs this exact `dashboard.cpp`, and by building
+all three envs:
 - Tile names are one line with "..." (they wrapped into the icon:
   `LONG_DOT` needs a height as well as a width). Compact tiles (5-6 on a
   page) put the icon inline before the name.
@@ -70,6 +74,23 @@ this exact `dashboard.cpp`, and by building all three envs:
   board, erases the pushed layout — see Safety net; `836fa814…6017`).
   Check the boot log against the healthy one in Safety net afterwards.
   If anything looks wrong, the 18 Oct images are the known-good ones.
+
+**Pages are names, not HA areas (20 Oct evening, user's request).** The
+firmware never cared: a layout's `areas` are strings and entities point
+at them by index, so a page can be anything. `select_layout()` gained
+`pages=` (entity_id -> page name, overriding its HA area) and
+`sensor_pages=` (sensor -> page, `""` hides it; placed sensors win over
+ones merely in the area). With neither given the output is unchanged —
+the byte-identity tests cover the old cases and three new ones. In the
+designer: a page chooser per device and per sensor, add / rename /
+remove pages, drag a tile onto another page, and a warning when a page
+title would run into the header's temperature (`sim_text_width()`, the
+panel's own font metrics; the title label is unbounded on the panel).
+Still max 6 pages besides Home. **No firmware change, no reflash.**
+Verified in the real app against a scratch project (21 checks: place a
+roomless light on a new page, rename a room page and its sensor follows,
+save, reload with nothing dirty, remove a page) and on the simulator's
+render. The paper and the tkinter tool still describe pages as rooms.
 
 Toolchain facts found on 20 Oct, all on this laptop:
 - **Emscripten SDK at `D:\Projects\emsdk`** (outside the repo). This
@@ -869,8 +890,9 @@ on the laptop goes offline.
 
 - Bedroom and Kitchen have no sensor readouts. See Scope.
 - The Office and Entrance lights and three generic fans exist in HA but
-  have no area, so `ha_discover.py` drops them. They are spares held in
-  reserve, not omissions.
+  have no area. They are spares held in reserve, not omissions. Since
+  20 Oct the designer can place them by giving them a page (below);
+  `ha_discover.py` without `pages=` still drops them.
 
 ## Safety net
 
@@ -894,8 +916,9 @@ on the laptop goes offline.
   and byte-checked against the build.
   - **`../homemesh_ha_firmware_20oct.bin` / `_20oct_full.bin`** — the
     20 Oct firmware with the name and light-theme fixes, built from
-    commit `c0ddab7`. **Never run on the board yet** — see "Added 20
-    Oct". Flash the same way as below, substituting the file name.
+    commit `c0ddab7`. **On the board since 20 Oct**, healthy boot log
+    — see "Added 20 Oct". Flash the same way as below, substituting the
+    file name.
   - **`../homemesh_ha_firmware_18oct_full.bin`** (last hardware-verified) —
     bootloader, partition table and app in one image, so it restores a
     board whatever was flashed to it last (`env:panel` and `env:demo`

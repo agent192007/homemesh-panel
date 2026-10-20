@@ -9,6 +9,7 @@ export interface PanelSimModule {
   _sim_layout_from_nvs(): number;
   _sim_pool_free(): number;
   _sim_fit_label(text: number, width: number): number;
+  _sim_text_width(text: number, px: number): number;
   _malloc(n: number): number;
   _free(p: number): void;
   HEAPU16: Uint16Array;

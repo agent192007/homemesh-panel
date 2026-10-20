@@ -248,7 +248,8 @@ async def fetch_inventory(url, token):
 
 
 def select_layout(inv, include=None, favourite=(), automations=None,
-                  order=None, icons=None, names=None, log=print):
+                  order=None, icons=None, names=None, pages=None,
+                  sensor_pages=None, log=print):
     """Turn a selection into the four tables a layout is made of.
 
     include     entity_ids to place, or None for everything controllable
@@ -262,12 +263,28 @@ def select_layout(inv, include=None, favourite=(), automations=None,
     icons       entity_id -> icon name, overriding the domain default
     names       entity_id -> name to show on the panel, overriding HA's
                 friendly name. Blank or whitespace means "use HA's".
+    pages       entity_id -> the page it goes on, overriding its HA area.
+                A page is only a name to the panel, so this is how a
+                device with no area in HA gets placed, and how pages
+                that are not HA areas are made. Blank means "its area".
+    sensor_pages
+                entity_id -> page for a temperature/humidity sensor,
+                overriding its HA area. "" hides the sensor. Sensors
+                placed here win over ones that are only in the area.
 
     Returns (area_names, rows, acts, sensor_rows) where rows are
     (eid, name, kind, area_index, favourite, icon).
     """
     icons = icons or {}
     names = names or {}
+    pages = pages or {}
+    sensor_pages = sensor_pages or {}
+
+    def page_of(eid, area):
+        p = (pages.get(eid) or "").strip()
+        if p:
+            return p
+        return inv.area_name.get(area) if area is not None else None
     favourite = set(favourite)
     chosen = [r for r in inv.controllable if include is None or r[0] in include]
 
@@ -283,29 +300,32 @@ def select_layout(inv, include=None, favourite=(), automations=None,
         rank = {eid: i for i, eid in enumerate(order)}
         chosen.sort(key=lambda r: rank.get(r[0], len(rank)))
 
-    # Areas that survive, in first-seen order. Entities with no area are
-    # dropped rather than invented into one.
+    # Pages that survive, by name, in first-seen order. Entities with no
+    # page - no area in HA and none given - are dropped rather than
+    # invented into one.
     used_areas, dropped = [], []
     for eid, name, kind, area in chosen:
-        if area is None:
+        page = page_of(eid, area)
+        if page is None:
             dropped.append(eid)
-        elif area not in used_areas:
-            used_areas.append(area)
+        elif page not in used_areas:
+            used_areas.append(page)
     if dropped:
         log(f"note: {len(dropped)} entity(ies) have no area in HA and were skipped:")
         for d in dropped:
             log(f"      {d}")
-        log("      assign an area in HA, or they cannot be placed on a room page.")
+        log("      assign an area in HA, or give them a page.")
     used_areas = used_areas[:MAX_AREAS]
 
     rows, per_area = [], {}
     for eid, name, kind, area in chosen:
-        if area not in used_areas:
+        page = page_of(eid, area)
+        if page not in used_areas:
             continue
-        idx = used_areas.index(area)
+        idx = used_areas.index(page)
         per_area.setdefault(idx, 0)
         if per_area[idx] >= MAX_PER_PAGE:
-            log(f"note: {inv.area_of(area)} page is full, skipping {eid}")
+            log(f"note: {page} page is full, skipping {eid}")
             continue
         per_area[idx] += 1
         rows.append((eid, (names.get(eid) or "").strip() or name, kind, idx,
@@ -326,17 +346,22 @@ def select_layout(inv, include=None, favourite=(), automations=None,
     # nothing to disambiguate a second candidate with. Areas with no
     # sensor are left out entirely; the panel renders those slots
     # blank rather than showing a made-up reading.
+    def sensor_page(s):
+        if s[0] in sensor_pages:
+            return (sensor_pages[s[0]] or "").strip() or None
+        return inv.area_name.get(s[3]) if s[3] is not None else None
+
     sensor_rows = []
-    for idx, area in enumerate(used_areas):
+    for idx, page in enumerate(used_areas):
         for dc in ("temperature", "humidity"):
-            match = next((s for s in inv.sensors if s[3] == area and s[2] == dc), None)
+            fits = [s for s in inv.sensors if s[2] == dc and sensor_page(s) == page]
+            match = next((s for s in fits if s[0] in sensor_pages), None) or (fits[0] if fits else None)
             if match:
                 sensor_rows.append((match[0], idx, dc == "humidity"))
         if not any(r[1] == idx for r in sensor_rows):
-            log(f"note: {inv.area_of(area)} has no temperature or humidity sensor")
+            log(f"note: {page} has no temperature or humidity sensor")
 
-    area_names = [inv.area_name[a] for a in used_areas]
-    return area_names, rows, acts, sensor_rows
+    return list(used_areas), rows, acts, sensor_rows
 
 
 def c_str(s):

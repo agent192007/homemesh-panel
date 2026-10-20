@@ -27,8 +27,15 @@ time, or via **Choose project folder…** in the Layout card.
 - **Entities**: tick to place, star for the Home page, pick an icon from
   the panel's own glyphs. Scenes, scripts and automations go on the
   Automations screen (swipe up on the panel).
-- **Pages**: drag tiles to reorder within a room; arrows move whole
-  rooms. **Rename any device** for the panel — clear the name to use Home
+- **Pages**: every device has a page chooser, starting at its Home
+  Assistant room. Put it on another page, **add your own pages**, rename
+  any page (click its name), or drag a tile onto another page; arrows
+  move a whole page. A device with no room in Home Assistant is placed by
+  choosing a page for it, and each page's header sensors are chosen the
+  same way. The panel only knows pages by name, so this is designer-side:
+  no firmware change. A page name too long for the header (it would run
+  into the temperature) is flagged, measured with the panel's own font.
+- **Rename any device** for the panel — clear the name to use Home
   Assistant's. Each name shows how the panel will cut it ("Ceiling...")
   and warns about characters its font cannot draw (accents, emoji).
 - **Colours**: six presets — Graphite (the default), Midnight, Forest,

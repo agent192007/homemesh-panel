@@ -133,6 +133,17 @@ EMSCRIPTEN_KEEPALIVE const char *sim_fit_label(const char *text, int width) {
   return lv_label_get_text(probe);
 }
 
+// Width in pixels of one line of text in the 14 or 20 px font, as LVGL
+// lays it out (kerning, whole-pixel glyphs). The designer uses it to warn
+// when a page name would run into the header's sensor reading - the
+// title label has no width limit on the panel.
+EMSCRIPTEN_KEEPALIVE int sim_text_width(const char *text, int px) {
+  const lv_font_t *f = px >= 20 ? &lv_font_montserrat_20 : &lv_font_montserrat_14;
+  lv_point_t sz;
+  lv_txt_get_size(&sz, text, f, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+  return sz.x;
+}
+
 EMSCRIPTEN_KEEPALIVE int sim_pool_free() {
   lv_mem_monitor_t m;
   lv_mem_monitor(&m);

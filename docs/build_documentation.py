@@ -893,8 +893,8 @@ para("Limits enforced by the firmware and the designer: <b>12 devices, 6 rooms, 
 h2("10.6 The user interface")
 para("A header shows the page title, that room's temperature and humidity, and a connection dot (green: "
      "online; amber: Wi-Fi but no server; red: no Wi-Fi). Pages swipe sideways: a Home page of favourites, then "
-     "one page per room, each with up to six tiles in two columns. Swiping up opens an Automations screen for "
-     "scenes, scripts and automations.")
+     "up to six more pages — by default one per room, but any page the designer names — each with up to six "
+     "tiles in two columns. Swiping up opens an Automations screen for scenes, scripts and automations.")
 figure(IMG / "ui_tile_detail.png", 15, "The Home page with lights on, and the detail panel for one light. "
        "Rendered by the panel's own interface code (Section 11.2), pixel for pixel.")
 bullets([
@@ -935,10 +935,14 @@ h2("11.1 What it does")
 bullets([
     "<b>Connects to Home Assistant</b> and lists every entity the panel can drive, grouped by room. Lights, "
     "switches, fans and helper switches are controllable; scenes, scripts and automations are actions; sensors "
-    "are kept only if they measure temperature or humidity. Entities with no room are shown but cannot be "
-    "placed, because the panel's pages are rooms.",
+    "are kept only if they measure temperature or humidity.",
     "<b>Pick and arrange:</b> tick a device to place it, star it for the Home page, choose its icon, drag tiles "
-    "to reorder within a room, and move whole rooms up and down.",
+    "to reorder, and move whole pages up and down.",
+    "<b>Pages are yours, not just Home Assistant's rooms.</b> Each device has a page chooser that starts at its "
+    "room; put it on any page instead, make new pages, rename them (\"Living Room\" can be \"Lounge\" on the "
+    "panel), or drag a tile onto another page. A device with no room in Home Assistant is placed by choosing a "
+    "page for it. The temperature and humidity shown in a page's header can be chosen the same way. To the "
+    "panel a page is just a name, so none of this needed a firmware change.",
     "<b>Rename</b> any device for the panel. Each name shows exactly how the panel will cut it "
     "(\"Ceiling...\") and warns about characters the panel's font cannot draw, such as accents.",
     "<b>Colours:</b> six presets or any of the nine colours by hand.",
@@ -1004,7 +1008,8 @@ para("Rubric minimum, all met: at least three lights with at least one brightnes
 h2("12.3 Changing what the panel shows")
 numbered([
     "Open the designer. It connects to Home Assistant and lists the devices.",
-    "Tick, star, rename, reorder and colour. The simulated panel updates as you go.",
+    "Tick, star, rename, reorder and colour; choose or create a page for any device. The simulated panel "
+    "updates as you go.",
     "Press <b>Push to panel</b>. The panel restarts and comes back with the new layout in a few seconds.",
     "Optionally <b>Save to project</b>, so the compiled fallback matches.",
 ])
@@ -1304,11 +1309,9 @@ table(["Do not say", "Say instead"], [
     ["That tiles can be resized or placed freely", "Tiles are placed by order in a fixed two-column grid."],
 ], [6.0, 10.0], size=9)
 h2("Check before the review: firmware on the board")
-callout("The board is running the 18 October firmware", [
-    "Fixes made on 20 October are built and tested in the simulator but <b>not yet flashed</b>: long names "
-    "wrapping into the icon, and three bugs that only show on the light (Daylight) theme.",
-    "Either flash <c>../homemesh_ha_firmware_20oct.bin</c> before the review and check the boot log, or demo "
-    "with a dark theme and short names.",
+callout("The board is running the 20 October firmware", [
+    "Flashed on 20 October with the fixes for long names and the light (Daylight) theme; the boot log matched "
+    "the healthy one. Check the names and the Daylight theme on the real screen once before the review.",
     "The new designer's Push sends the same event as the old tool (tested byte for byte), but nobody has yet "
     "watched a push from <i>the new designer</i> arrive on the board. Do it once with the serial monitor open "
     "and look for <c>[layout] push received</c> then <c>[layout] loaded from NVS</c>.",
