@@ -7,6 +7,7 @@ import {
 } from "./layout/format";
 import { presetOf, THEME_PRESETS } from "./layout/themes";
 import { Glyph, IconPicker } from "./IconPicker";
+import { fitName, nameBox } from "./layout/nameFit";
 import { Ev, Link, SimEvent } from "./sim/events";
 import { PanelSimulator, PanelSimulatorHandle } from "./sim/PanelSimulator";
 
@@ -369,6 +370,12 @@ export default function App() {
                 {p.ents.map((e) => {
                   const ha = friendlyName.get(e.id) ?? e.name;
                   const custom = sel.names[e.id] !== undefined && sel.names[e.id] !== ha;
+                  // The tightest place this device appears: Home and its
+                  // room can have different tile sizes (5-6 = compact).
+                  const compact = (layout?.entities.filter((x) => x.area === e.area).length ?? 0) > 4
+                    || (e.fav && (layout?.entities.filter((x) => x.fav).length ?? 0) > 4);
+                  const shown = sim.current?.fitLabel(e.name, nameBox(e.kind, compact)) ?? e.name;
+                  const missing = fitName(e.name).missing;
                   return (
                     <div key={e.id} className={`tile-row ${pi === 0 ? "fixed" : ""}`} draggable={pi > 0}
                       onDragStart={() => { dragId.current = e.id; }}
@@ -378,6 +385,12 @@ export default function App() {
                         title={custom ? `Custom name. Home Assistant calls it "${ha}".` : "Type a shorter name for the panel"}
                         onChange={(ev) => { const v = ev.target.value; setSel((s) => ({ ...s, names: { ...s.names, [e.id]: v } })); }} />
                       <Glyph name={e.icon} />
+                      {(shown !== e.name || missing.length > 0) && (
+                        <div className="fit-note">
+                          {shown !== e.name && <span>Panel shows “{shown}”{compact ? " (compact tile)" : ""}</span>}
+                          {missing.length > 0 && <span className="bad-text">Panel's font has no {missing.map((m) => `“${m}”`).join(" ")} — it will be skipped</span>}
+                        </div>
+                      )}
                     </div>
                   );
                 })}

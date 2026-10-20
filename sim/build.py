@@ -33,7 +33,7 @@ LVGL = LIBS / "lvgl"
 AJSON = LIBS / "ArduinoJson" / "src"
 
 EXPORTS = ["sim_boot", "sim_step", "sim_framebuffer", "sim_pointer", "sim_event",
-           "sim_store_layout", "sim_layout_from_nvs", "sim_pool_free", "malloc", "free"]
+           "sim_store_layout", "sim_layout_from_nvs", "sim_pool_free", "sim_fit_label", "malloc", "free"]
 RUNTIME = ["ccall", "cwrap", "HEAPU16", "UTF8ToString", "stringToUTF8", "lengthBytesUTF8"]
 
 INCLUDES = [SIM / "shim", ROOT / "include", ROOT / "src", LVGL, AJSON]

@@ -13,6 +13,9 @@ const W = 320, H = 240;
 
 export interface PanelSimulatorHandle {
   post(e: SimEvent): void;
+  // LVGL's own one-line LONG_DOT cut of `text` in `width` px, or null
+  // before the simulator is up. See sim_fit_label().
+  fitLabel(text: string, width: number): string | null;
 }
 
 interface Props {
@@ -36,6 +39,16 @@ export const PanelSimulator = forwardRef<PanelSimulatorHandle, Props>(function P
 
   useImperativeHandle(ref, () => ({
     post(e) { sim.current?._sim_event(e.type, e.entity, e.value, e.fvalue ?? 0); },
+    fitLabel(text, width) {
+      const m = sim.current;
+      if (!m) return null;
+      const n = m.lengthBytesUTF8(text) + 1;
+      const p = m._malloc(n);
+      m.stringToUTF8(text, p, n);
+      const out = m.UTF8ToString(m._sim_fit_label(p, width));
+      m._free(p);
+      return out;
+    },
   }), []);
 
   // Apply a layout: validate in a fresh instance, swap only if accepted.

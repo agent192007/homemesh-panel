@@ -8,6 +8,7 @@ export interface PanelSimModule {
   _sim_store_layout(json: number, err: number, errN: number): number;
   _sim_layout_from_nvs(): number;
   _sim_pool_free(): number;
+  _sim_fit_label(text: number, width: number): number;
   _malloc(n: number): number;
   _free(p: number): void;
   HEAPU16: Uint16Array;

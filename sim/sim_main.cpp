@@ -114,6 +114,25 @@ EMSCRIPTEN_KEEPALIVE void sim_event(int type, int entity, int value, float fvalu
 
 EMSCRIPTEN_KEEPALIVE int sim_layout_from_nvs() { return g_layout.from_nvs ? 1 : 0; }
 
+// How a tile would show `text` in a label `width` px wide: one line of
+// the default font, LONG_DOT - exactly as create_device_tile() sets up
+// a name. Returns LVGL's own result, dots and all, so the designer can
+// show what the panel will draw without re-implementing LVGL's wrapping,
+// per-glyph rounding and kerning. The probe lives hidden on the system
+// layer and never draws.
+EMSCRIPTEN_KEEPALIVE const char *sim_fit_label(const char *text, int width) {
+  static lv_obj_t *probe;
+  if (!probe) {
+    probe = lv_label_create(lv_layer_sys());
+    lv_obj_add_flag(probe, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_long_mode(probe, LV_LABEL_LONG_DOT);
+  }
+  lv_obj_set_size(probe, width, lv_font_get_line_height(lv_obj_get_style_text_font(probe, LV_PART_MAIN)));
+  lv_obj_update_layout(probe);
+  lv_label_set_text(probe, text);
+  return lv_label_get_text(probe);
+}
+
 EMSCRIPTEN_KEEPALIVE int sim_pool_free() {
   lv_mem_monitor_t m;
   lv_mem_monitor(&m);

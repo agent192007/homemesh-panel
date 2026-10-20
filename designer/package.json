@@ -9,7 +9,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types tests/format.test.ts",
+    "test": "node --experimental-strip-types tests/format.test.ts && node --experimental-strip-types tests/namefit.test.ts",
     "dist": "npm run build && electron-builder --win portable",
     "start": "node scripts/start.mjs"
   },
