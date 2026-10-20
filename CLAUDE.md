@@ -385,8 +385,11 @@ entity table **and the colours** loaded at runtime from NVS.
   and why the split above resolves toward the laptop.
 - The MQTT broker at `192.168.100.9` is no longer in the loop.
 - Git identity was never configured on the laptop (only on the desktop).
-  It is now set repo-locally to `Pranesh S <king191621@gmail.com>`, the
-  identity the whole history uses.
+  History up to 20 Oct is authored `Pranesh S <king191621@gmail.com>`.
+  **From 20 Oct evening, at the user's request, new commits are
+  `Garima Nidhi <ishima.2026@gmail.com>`** (set repo-locally). Past
+  commits were not re-authored. Commit messages carry no AI attribution
+  lines - the user had them stripped from the whole history on 20 Oct.
 
 Added since, on 15-16 Oct:
 
