@@ -36,16 +36,40 @@ on (brightness 102), then off. See `designer/README.md`.
   against the Python on a stored HA snapshot. Python stays the
   reference — change the format there first.
 - The tkinter `tools/layout_designer.py` stays: the paper (due 21 Oct)
-  describes it, and the paper was frozen before this started.
-- Not done: packaging (`npm run dist` is configured for an
-  electron-builder portable exe, never run); room (page) reordering;
-  automations in the UI.
-- **The simulator found a real panel bug:** a tile name that needs two
-  or three lines ("Ceiling Lights", "Living Room RGBWW Lights") wraps
-  down into the icon disc. `dashboard.cpp` sets the name label's width
-  and `LV_LABEL_LONG_DOT` but no height, so it wraps instead of
-  truncating. One-line fix (give the label one line's height). Not
-  applied — firmware frozen at `v0.4-firmware-freeze` for the demo.
+  describes it. **It does not know custom names** — saving from it
+  writes HA's names back. Use the new designer.
+- Second pass, 20 Oct afternoon (user away, asked for it): custom
+  names, six theme presets, app dark/light/auto mode, room reordering,
+  automations, icon picker showing the panel's glyphs, unsaved-changes
+  + Revert, a double-click launcher, and a **portable exe**
+  (`npm run dist`, verified: the built exe found the project, read the
+  token, connected and booted the simulator).
+- **Name hints come from LVGL itself.** `sim_fit_label()` lays a name
+  out in an off-screen label set up like a tile's and returns LVGL's
+  `LONG_DOT` result. A JS re-implementation got 3 of 8 cuts wrong —
+  LVGL wraps at word boundaries, rounds each glyph to whole pixels and
+  kerns. `tests/namefit.test.ts` checks against eight cuts the firmware
+  rendered. Names with characters the font lacks (it has printable
+  ASCII and °) are flagged; LVGL drops those silently.
+
+**Firmware changed after `v0.4-firmware-freeze` — at the user's request
+("fix the text overflowing"), 20 Oct — and is NOT yet on the board** (no
+serial port while it was done). Verified in the simulator, which runs
+this exact `dashboard.cpp`, and by building all three envs:
+- Tile names are one line with "..." (they wrapped into the icon:
+  `LONG_DOT` needs a height as well as a width). Compact tiles (5-6 on a
+  page) put the icon inline before the name.
+- Rendering every preset on the real UI (`designer/tests/theme_sheet.py`)
+  found three bugs only visible on a light theme: ON tiles lost their
+  names (LVGL's default theme makes checked-button text white), the
+  detail panel's close glyph was white on white, and lightening a white
+  tile does nothing. Text colours are now explicit, and `shade()`
+  darkens light colours instead of lightening them.
+- To flash: `../homemesh_ha_firmware_20oct.bin` (app only, keeps the
+  pushed layout; SHA-256 `74be98dd…f5ed`) or `_20oct_full.bin` (whole
+  board, erases the pushed layout — see Safety net; `836fa814…6017`).
+  Check the boot log against the healthy one in Safety net afterwards.
+  If anything looks wrong, the 18 Oct images are the known-good ones.
 
 Toolchain facts found on 20 Oct, all on this laptop:
 - **Emscripten SDK at `D:\Projects\emsdk`** (outside the repo). This
@@ -57,7 +81,15 @@ Toolchain facts found on 20 Oct, all on this laptop:
   then runs as plain Node and fails with "does not provide an export
   named 'BrowserWindow'". Unset it to launch.
 - Node 26 runs `.ts` directly (`--experimental-strip-types`) but not
-  constructor parameter properties — keep shared TS strip-compatible.
+  constructor parameter properties — keep shared TS strip-compatible,
+  and give relative imports their `.ts` extension in files Node loads.
+- A portable exe runs from a temp folder; `PORTABLE_EXECUTABLE_DIR`
+  holds where it really sits. The project folder choice is remembered in
+  Electron's userData `settings.json`.
+- Driving the app headlessly: launch it with
+  `--remote-debugging-port=N` and send `Runtime.evaluate` over the
+  DevTools WebSocket — how every UI check on 20 Oct was done. Close
+  stray instances first, or the port lands on the old one.
 
 ## Pick up here (18 Oct)
 
@@ -876,7 +908,11 @@ on the laptop goes offline.
   misbehaves. This is the real demo insurance. Both 18 Oct images were
   built from a clean tree at the commit `v0.4-firmware-freeze` tags,
   and byte-checked against the build.
-  - **`../homemesh_ha_firmware_18oct_full.bin`** (current) —
+  - **`../homemesh_ha_firmware_20oct.bin` / `_20oct_full.bin`** — the
+    20 Oct firmware with the name and light-theme fixes, built from
+    commit `c0ddab7`. **Never run on the board yet** — see "Added 20
+    Oct". Flash the same way as below, substituting the file name.
+  - **`../homemesh_ha_firmware_18oct_full.bin`** (last hardware-verified) —
     bootloader, partition table and app in one image, so it restores a
     board whatever was flashed to it last (`env:panel` and `env:demo`
     use a different partition table). From the project folder:

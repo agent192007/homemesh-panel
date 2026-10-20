@@ -347,12 +347,18 @@ Limits, if asked: 12 devices, 6 rooms, 6 devices per page.
 
 ## 9. What is not finished
 
-- **A new layout designer** (`designer/`, Electron) works as of 20
-  October: its preview is the panel's own interface code compiled to
-  WebAssembly — a real LVGL simulator, not a lookalike — and its Live
-  mode drives real devices from the simulated screen. Not yet packaged
-  as an installer. The paper, frozen before this, describes the earlier
-  tkinter designer, which still works.
+- **A new layout designer** (`designer/`, Electron, 20 October): its
+  preview is the panel's own interface code compiled to WebAssembly — a
+  real LVGL simulator, not a lookalike — and its Live mode drives real
+  devices from the simulated screen. It adds custom device names (with
+  the panel's exact truncation shown as you type), six colour themes
+  including a light one, icon and room ordering, and ships as a portable
+  `.exe`. The paper, frozen before this, describes the earlier tkinter
+  designer, which still works.
+- **Firmware fixes made on 20 October are not yet on the board**: long
+  device names now truncate cleanly instead of wrapping into the icon,
+  and three light-theme colour bugs are fixed. Verified in the simulator
+  and built; flash `../homemesh_ha_firmware_20oct.bin` to apply.
 - **MQTT has not been removed.** Unused, but deleting it also deletes a
   working fallback.
 - **The microSD card has never been tested.**
