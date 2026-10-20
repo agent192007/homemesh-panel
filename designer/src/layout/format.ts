@@ -183,6 +183,10 @@ export function selectLayout(inv: Inventory, sel: Selection): Tables {
     rows.push([r.id, name, r.kind, idx, sel.favourite.has(r.id), sel.icons[r.id] || defaultIcon(r.id)]);
     if (rows.length >= MAX_ENTITIES) break;
   }
+  // Python stops here silently; the designer says so. Notes are not part
+  // of the output, so the tables stay identical to the reference.
+  const placeable = chosen.filter((r) => r.area !== null && areas.includes(r.area)).length;
+  if (placeable > MAX_ENTITIES) notes.push(`the panel holds ${MAX_ENTITIES} devices; ${placeable - MAX_ENTITIES} more are selected and will not appear`);
   const nFav = rows.filter((r) => r[4]).length;
   if (nFav > MAX_PER_PAGE) notes.push(`${nFav} favourites but the Home page holds ${MAX_PER_PAGE}`);
 

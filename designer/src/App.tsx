@@ -300,7 +300,8 @@ export default function App() {
                 const on = sel.include.has(r.id);
                 return (
                   <div key={r.id} className={`ent ${on ? "on" : ""} ${g.area ? "" : "disabled"}`}>
-                    <input type="checkbox" checked={on} disabled={!g.area}
+                    <input type="checkbox" checked={on} disabled={!g.area || (!on && sel.include.size >= MAX_ENTITIES)}
+                      title={!on && sel.include.size >= MAX_ENTITIES ? `The panel holds ${MAX_ENTITIES} devices` : undefined}
                       onChange={() => setSel((s) => ({ ...s, include: toggle(s.include, r.id), order: s.order.includes(r.id) ? s.order : [...s.order, r.id] }))} />
                     <button className={`star ${sel.favourite.has(r.id) ? "fav" : ""}`} title="Show on the Home page" disabled={!g.area}
                       onClick={() => setSel((s) => ({ ...s, favourite: toggle(s.favourite, r.id) }))}>★</button>
