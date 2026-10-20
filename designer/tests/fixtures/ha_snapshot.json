@@ -328,35 +328,40 @@
    "entity_id": "fan.living_room_fan",
    "state": "unknown",
    "attributes": {
-    "friendly_name": "Living Room Fan"
+    "friendly_name": "Living Room Fan",
+    "supported_features": 55
    }
   },
   {
    "entity_id": "fan.ceiling_fan",
    "state": "unknown",
    "attributes": {
-    "friendly_name": "Ceiling Fan"
+    "friendly_name": "Ceiling Fan",
+    "supported_features": 49
    }
   },
   {
    "entity_id": "fan.percentage_full_fan",
    "state": "unknown",
    "attributes": {
-    "friendly_name": "Percentage Full Fan"
+    "friendly_name": "Percentage Full Fan",
+    "supported_features": 55
    }
   },
   {
    "entity_id": "fan.percentage_limited_fan",
    "state": "unknown",
    "attributes": {
-    "friendly_name": "Percentage Limited Fan"
+    "friendly_name": "Percentage Limited Fan",
+    "supported_features": 49
    }
   },
   {
    "entity_id": "fan.preset_only_limited_fan",
    "state": "unknown",
    "attributes": {
-    "friendly_name": "Preset Only Limited Fan"
+    "friendly_name": "Preset Only Limited Fan",
+    "supported_features": 56
    }
   },
   {
@@ -917,6 +922,48 @@
    "state": "unknown",
    "attributes": {
     "friendly_name": "Thunderstorm"
+   }
+  },
+  {
+   "entity_id": "scene.movie_night",
+   "state": "2026-10-20T20:33:39.920268+00:00",
+   "attributes": {
+    "friendly_name": "Movie Night"
+   }
+  },
+  {
+   "entity_id": "scene.bright",
+   "state": "2026-10-20T20:33:41.297465+00:00",
+   "attributes": {
+    "friendly_name": "Bright"
+   }
+  },
+  {
+   "entity_id": "script.all_off",
+   "state": "off",
+   "attributes": {
+    "friendly_name": "All Off"
+   }
+  },
+  {
+   "entity_id": "script.goodnight",
+   "state": "off",
+   "attributes": {
+    "friendly_name": "Goodnight"
+   }
+  },
+  {
+   "entity_id": "automation.evening_lights",
+   "state": "on",
+   "attributes": {
+    "friendly_name": "Evening Lights"
+   }
+  },
+  {
+   "entity_id": "automation.welcome_home",
+   "state": "on",
+   "attributes": {
+    "friendly_name": "Welcome Home"
    }
   }
  ],

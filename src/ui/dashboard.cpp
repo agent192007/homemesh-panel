@@ -214,6 +214,7 @@ static void open_detail(uint8_t entity) {
     lv_obj_set_width(dp_slider, 280);
   }
 
+  lv_label_set_text(dp_cap, d->fan ? "Speed" : "Brightness");
   refresh_detail();
   lv_obj_clear_flag(dp_panel, LV_OBJ_FLAG_HIDDEN);
 }
@@ -670,16 +671,37 @@ static void create_automation_pages() {
       uint8_t idx = p * 4 + k;
       if (idx >= auto_n) break;
 
+      const AutomationDesc *a = transport_automation(idx);
       lv_obj_t *b = lv_btn_create(tile);
       style_card(b);
       lv_obj_set_size(b, w, h);
       lv_obj_set_pos(b, GAP + (k % 2) * (w + GAP), GAP + (k / 2) * (h + GAP));
-      lv_obj_set_style_bg_color(b, COL_ACCENT, LV_STATE_CHECKED);
+      lv_color_t text = COL_TEXT;
+      if (a->has_color) {
+        // Its own colour from the designer, with text that stays
+        // readable on it; running it flashes a shade of the same.
+        lv_color_t c = lv_color_hex(a->color);
+        lv_obj_set_style_bg_color(b, c, 0);
+        lv_obj_set_style_border_color(b, shade(c, 60), 0);
+        lv_obj_set_style_bg_color(b, shade(c, 110), LV_STATE_CHECKED);
+        text = lv_color_brightness(c) > 160 ? lv_color_hex(0x101418) : lv_color_white();
+      } else {
+        lv_obj_set_style_bg_color(b, COL_ACCENT, LV_STATE_CHECKED);
+      }
       lv_obj_add_event_cb(b, automation_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)idx);
 
+      // Up to two lines, then "...": LONG_DOT only cuts inside a set
+      // height - with a width alone the label just keeps wrapping.
       lv_obj_t *l = lv_label_create(b);
-      lv_label_set_text(l, transport_automation(idx)->name);
+      lv_label_set_text(l, a->name);
+      lv_obj_set_style_text_color(l, text, 0);
+      lv_obj_set_style_text_color(l, text, LV_STATE_CHECKED);
+      lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+      // Content height capped at two lines, so a one-word name still
+      // sits in the middle of the button.
       lv_obj_set_width(l, w - 20);
+      lv_obj_set_height(l, LV_SIZE_CONTENT);
+      lv_obj_set_style_max_height(l, 2 * lv_font_get_line_height(lv_obj_get_style_text_font(l, LV_PART_MAIN)), 0);
       lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
       lv_obj_center(l);
 

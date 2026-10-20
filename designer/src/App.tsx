@@ -22,6 +22,7 @@ interface Sel {
   pages: Record<string, string>;
   sensorPages: Record<string, string>;
   extraPages: string[];       // pages made here that have no device yet
+  actionColors: Record<string, string>;   // automation -> "#RRGGBB" button colour
 }
 
 function selFromLayout(l: Layout): Sel {
@@ -37,6 +38,7 @@ function selFromLayout(l: Layout): Sel {
     pages: Object.fromEntries(l.entities.map((e) => [e.id, l.areas[e.area]])),
     sensorPages: Object.fromEntries(l.sensors.map((s) => [s.id, l.areas[s.area]])),
     extraPages: [],
+    actionColors: Object.fromEntries(l.actions.filter((a) => a.color).map((a) => [a.id, a.color!])),
   };
 }
 
@@ -81,7 +83,7 @@ export default function App() {
   const [client, setClient] = useState<HaClient | null>(null);
   const [inv, setInv] = useState<Inventory | null>(null);
   const [sel, setSel] = useState<Sel>({ include: new Set(), favourite: new Set(), order: [], icons: {}, names: {},
-    automations: new Set(), pages: {}, sensorPages: {}, extraPages: [] });
+    automations: new Set(), pages: {}, sensorPages: {}, extraPages: [], actionColors: {} });
   const [newPage, setNewPage] = useState("");
   const [theme, setTheme] = useState<Record<string, string>>({ ...THEME_DEFAULTS });
   const [saved, setSaved] = useState<Layout | null>(null);
@@ -149,7 +151,8 @@ export default function App() {
     include: sel.include, favourite: sel.favourite, automations: sel.automations, order: sel.order,
     icons: sel.icons, names: sel.names, pages: sel.pages, sensorPages: sel.sensorPages,
   }) : null, [inv, sel]);
-  const layout: Layout | null = useMemo(() => tables ? buildLayout(tables, theme) : saved, [tables, theme, saved]);
+  const layout: Layout | null = useMemo(() => tables ? buildLayout(tables, theme, sel.actionColors) : saved,
+    [tables, theme, saved, sel.actionColors]);
   const json = useMemo(() => (layout ? dumpLayout(layout) : ""), [layout]);
   const simJson = useDebounced(json, 250);
   const bytes = new TextEncoder().encode(json).length;
@@ -194,10 +197,14 @@ export default function App() {
         const st = { ...(liveStates.current.get(eid) ?? {}) };
         if (body.s !== undefined) st.s = body.s;
         if (body.a && "brightness" in body.a) st.brightness = body.a.brightness;
+        // A fan's speed, 0-100 and null while off, as the firmware maps it.
+        const pct = eid.startsWith("fan.") && body.a ? body.a.percentage : undefined;
+        if (pct > 0) st.brightness = Math.min(255, Math.max(1, Math.round(pct * 255 / 100)));
         if (body.a && "rgb_color" in body.a) st.rgb = body.a.rgb_color;
         liveStates.current.set(eid, st);
         const i = layout.entities.findIndex((e) => e.id === eid);
-        if (i >= 0) for (const e of stateEvents(i, { s: body.s, brightness: body.a?.brightness, rgb: body.a?.rgb_color })) sim.current?.post(e);
+        const level = pct > 0 ? st.brightness : eid.startsWith("fan.") ? undefined : body.a?.brightness;
+        if (i >= 0) for (const e of stateEvents(i, { s: body.s, brightness: level, rgb: body.a?.rgb_color })) sim.current?.post(e);
         layout.sensors.forEach((s) => {
           const v = parseFloat(body.s);
           if (s.id === eid && !Number.isNaN(v)) sim.current?.post({ type: s.hum ? Ev.Humidity : Ev.Temperature, entity: s.area, value: 0, fvalue: v });
@@ -229,6 +236,8 @@ export default function App() {
       const domain = ent.id.split(".")[0];
       const target = { entity_id: ent.id };
       if (kind === Ev.Power) client.cmd("call_service", { domain, service: value ? "turn_on" : "turn_off", target });
+      else if (kind === Ev.Brightness && domain === "fan")
+        client.cmd("call_service", { domain, service: "set_percentage", target, service_data: { percentage: Math.max(1, Math.round(value * 100 / 255)) } });
       else if (kind === Ev.Brightness) client.cmd("call_service", { domain, service: "turn_on", target, service_data: { brightness: value } });
       else if (kind === Ev.Color) client.cmd("call_service", { domain, service: "turn_on", target, service_data: { rgb_color: [(value >> 16) & 255, (value >> 8) & 255, value & 255] } });
       return;
@@ -478,14 +487,26 @@ export default function App() {
             <div className="group autos">
               <h3>Automations screen <em className="soft">· swipe up on the panel · {sel.automations.size}/{MAX_AUTOMATIONS}</em></h3>
               {inv.actions.length === 0 && <p className="hint">No scenes, scripts or automations in Home Assistant.</p>}
-              {inv.actions.map((a) => (
-                <label key={a.id} className="ent auto-row">
-                  <input type="checkbox" checked={sel.automations.has(a.id)}
-                    disabled={!sel.automations.has(a.id) && sel.automations.size >= MAX_AUTOMATIONS}
-                    onChange={() => setSel((s) => ({ ...s, automations: toggle(s.automations, a.id) }))} />
-                  <div className="ent-name"><div>{a.name}</div><code>{a.id}</code></div>
-                </label>
-              ))}
+              {inv.actions.map((a) => {
+                const colour = sel.actionColors[a.id];
+                return (
+                  <div key={a.id} className="ent auto-row">
+                    <input type="checkbox" checked={sel.automations.has(a.id)}
+                      disabled={!sel.automations.has(a.id) && sel.automations.size >= MAX_AUTOMATIONS}
+                      onChange={() => setSel((s) => ({ ...s, automations: toggle(s.automations, a.id) }))} />
+                    <div className="ent-name"><div>{a.name}</div><code>{a.id}</code></div>
+                    <span className="auto-colour">
+                      <input type="color" value={colour ?? "#2A2F36"} title="This automation's button colour on the panel"
+                        className={colour ? "set" : ""}
+                        onChange={(e) => { const v = e.target.value.toUpperCase(); setSel((s) => ({ ...s, actionColors: { ...s.actionColors, [a.id]: v } })); }} />
+                      {colour
+                        ? <button className="ghost small" title="Back to a plain button"
+                            onClick={() => setSel((s) => { const c = { ...s.actionColors }; delete c[a.id]; return { ...s, actionColors: c }; })}>✕</button>
+                        : <span className="soft">plain</span>}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>

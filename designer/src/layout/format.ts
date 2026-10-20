@@ -17,6 +17,8 @@ export const MAX_AUTOMATIONS = 8;
 export const MAX_PER_PAGE = 6;
 
 const TOGGLE_DOMAINS = new Set(["switch", "fan", "input_boolean"]);
+// FanEntityFeature.SET_SPEED: such a fan is Dimmable - a speed slider.
+const FAN_SET_SPEED = 1;
 const ACTION_DOMAINS = new Set(["scene", "script", "automation"]);
 const SENSOR_CLASSES = new Set(["temperature", "humidity"]);
 const RGB_MODES = new Set(["hs", "rgb", "rgbw", "rgbww", "xy"]);
@@ -74,7 +76,7 @@ export interface Layout {
   v: number;
   areas: string[];
   entities: { id: string; name: string; kind: Kind; area: number; fav: boolean; icon: string }[];
-  actions: { id: string; name: string }[];
+  actions: { id: string; name: string; color?: string }[];
   sensors: { id: string; area: number; hum: boolean }[];
   theme?: Record<string, string>;
 }
@@ -85,6 +87,7 @@ export function defaultIcon(entityId: string): string {
 
 export function classify(s: HaState): Kind | null {
   const domain = s.entity_id.split(".", 1)[0];
+  if (domain === "fan" && (Number(s.attributes?.supported_features) || 0) & FAN_SET_SPEED) return "Dimmable";
   if (TOGGLE_DOMAINS.has(domain)) return "Toggle";
   if (domain === "light") {
     const modes: string[] = s.attributes?.supported_color_modes ?? [];
@@ -229,12 +232,13 @@ export function selectLayout(inv: Inventory, sel: Selection): Tables {
   return { areaNames: [...areas], rows, acts, sensorRows, notes };
 }
 
-export function buildLayout(t: Tables, theme?: Record<string, string>): Layout {
+// actionColors: entity_id -> "#RRGGBB" for that automation's button.
+export function buildLayout(t: Tables, theme?: Record<string, string>, actionColors?: Record<string, string>): Layout {
   const out: Layout = {
     v: LAYOUT_VERSION,
     areas: [...t.areaNames],
     entities: t.rows.map(([id, name, kind, area, fav, icon]) => ({ id, name, kind, area, fav, icon })),
-    actions: t.acts.map(([id, name]) => ({ id, name })),
+    actions: t.acts.map(([id, name]) => (actionColors?.[id] ? { id, name, color: actionColors[id].toUpperCase() } : { id, name })),
     sensors: t.sensorRows.map(([id, area, hum]) => ({ id, area, hum })),
   };
   if (theme) {

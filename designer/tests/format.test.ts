@@ -23,6 +23,7 @@ interface Case {
   names?: Record<string, string>;
   pages?: Record<string, string>;
   sensorPages?: Record<string, string>;
+  actionColors?: Record<string, string>;
 }
 const savedIds = saved.entities.map((e: any) => e.id);
 const cases: Case[] = [
@@ -49,6 +50,10 @@ const cases: Case[] = [
     order: [], icons: {}, theme: null,
     pages: { "light.kitchen_lights": "Downstairs" },
     sensorPages: { "sensor.outside_temperature": "Downstairs", "sensor.outside_humidity": "" } },
+  { name: "speed fans as Dimmable, coloured automations", favourite: [], automations: null, order: [], icons: {},
+    include: ["fan.ceiling_fan", "fan.living_room_fan", "fan.preset_only_limited_fan", "light.bed_light"],
+    pages: { "fan.preset_only_limited_fan": "Bedroom" }, theme: null,
+    actionColors: { "scene.movie_night": "#e5484d", "script.all_off": "#3DDC84", "automation.nope": "#123456" } },
   { name: "a renamed room page", include: savedIds, favourite: [], automations: [], order: savedIds, icons: {}, theme: null,
     pages: { "light.ceiling_lights": "Lounge", "light.living_room_rgbww_lights": "Lounge" },
     sensorPages: { "sensor.outside_temperature": "Lounge", "sensor.outside_humidity": "Lounge" } },
@@ -76,7 +81,8 @@ for c in cases:
                          automations=None if c["automations"] is None else set(c["automations"]),
                          order=c["order"], icons=c["icons"], names=c.get("names"),
                          pages=c.get("pages"), sensor_pages=c.get("sensorPages"), log=lambda *a: None)
-    out.append({"json": hd.dump_layout(hd.build_layout(*t, theme=c["theme"])), "header": hd.build_header(*t)})
+    out.append({"json": hd.dump_layout(hd.build_layout(*t, theme=c["theme"], action_colors=c.get("actionColors"))),
+                "header": hd.build_header(*t)})
 print(json.dumps(out))
 `;
 const ref = JSON.parse(execFileSync("python", ["-c", py, resolve(root, "tools"), resolve(here, "fixtures", "ha_snapshot.json")],
@@ -90,7 +96,7 @@ cases.forEach((c, i) => {
     automations: c.automations === null ? null : new Set(c.automations), order: c.order, icons: c.icons,
     names: c.names, pages: c.pages, sensorPages: c.sensorPages,
   });
-  const json = dumpLayout(buildLayout(t, c.theme ?? undefined));
+  const json = dumpLayout(buildLayout(t, c.theme ?? undefined, c.actionColors));
   const header = buildHeader(t);
   for (const [what, mine, theirs] of [["layout JSON", json, ref[i].json], ["ha_layout.h", header, ref[i].header]]) {
     const ok = mine === theirs;

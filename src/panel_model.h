@@ -77,8 +77,17 @@ struct EntityDesc {
   // without it, and a trailing member value-initialises to null.
   // Null is valid and draws the unknown glyph.
   const char *icon;
+  // A fan whose level is its speed, not brightness. Only labels change;
+  // the transport converts HA's percentage to and from 0-255. Trailing
+  // for the same reason as icon: brace-initialisers leave it false.
+  bool fan;
 };
 
 struct AutomationDesc {
   const char *name;
+  // Optional button colour (0xRRGGBB) chosen in the designer; without
+  // one the button is a plain card. Trailing, so brace-initialisers
+  // leave has_color false.
+  bool has_color;
+  uint32_t color;
 };

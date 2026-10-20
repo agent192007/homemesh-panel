@@ -920,6 +920,11 @@ bullets([
     "was noise; the lift is quieter and still unmistakable.",
     "<b>Long names</b> are cut to one line with \"...\". The designer shows the exact cut while you type.",
     "<b>Icons</b> are 16 Material Design glyphs compiled into fonts, so they cost flash, not graphics memory.",
+    "<b>Fans with speed control</b> work like dimmable lights: the tile shows the speed and the detail panel's "
+    "slider is labelled Speed. Home Assistant reports a fan's speed as a percentage; the firmware converts it, "
+    "and sends <c>fan.set_percentage</c> back.",
+    "<b>Automations</b> (scenes, scripts and automations) are buttons on their own screen, swiped up to. Each "
+    "can have its own colour, chosen in the designer; long names wrap to two lines.",
     "<b>Fills are flat.</b> Gradients were tried and removed: the 16-bit display has only 32 levels of red and "
     "blue, so a subtle gradient showed as visible, tinted bands.",
 ])
@@ -1355,14 +1360,21 @@ table(["Do not say", "Say instead"], [
     ["That tiles can be resized or placed freely", "Tiles are placed by order in a fixed two-column grid."],
 ], [6.0, 10.0], size=9)
 h2("Check before the review: firmware on the board")
-callout("The board is running the 20 October firmware", [
+callout("The board is running the 20 October firmware — flash the 21 October one", [
     "Flashed on 20 October with the fixes for long names and the light (Daylight) theme; the boot log matched "
     "the healthy one. Check the names and the Daylight theme on the real screen once before the review.",
+    "<b>The 21 October firmware adds fan speed and automation colours and is not flashed yet</b> (the board was "
+    "unplugged). Flash it (<c>pio run -e ha -t upload</c>, or <c>../homemesh_ha_firmware_21oct.bin</c>), check "
+    "the boot log, then push the layout again. <b>Until then, do not push a layout with a speed-controlled fan "
+    "on it</b>: the old firmware would send the fan a light's brightness command, which Home Assistant "
+    "rejects.",
     "The new designer's Push sends the same event as the old tool (tested byte for byte), but nobody has yet "
     "watched a push from <i>the new designer</i> arrive on the board. Do it once with the serial monitor open "
     "and look for <c>[layout] push received</c> then <c>[layout] loaded from NVS</c>.",
-    "The Automations screen needs at least one scene, script or automation in Home Assistant. The demo "
-    "installation has none, so do not promise it unless one is added.",
+    "The demo installation now has six for the Automations screen (added 21 October): scenes Movie Night and "
+    "Bright, scripts All Off and Goodnight, automations Evening Lights and Welcome Home. Welcome Home is the "
+    "one to show: turning the Panel Demo Switch on from the panel makes Home Assistant switch on the ceiling "
+    "and entrance lights. Tick them in the designer and push to put them on the panel.",
 ])
 h2("Two quirks that may be noticed, and how to answer")
 table(["If someone notices", "The answer"], [

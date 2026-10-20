@@ -45,6 +45,9 @@ LAYOUT_OUT = HERE.parent / "include" / "ha_layout.json"
 
 # Domains the panel can actually control, mapped to how they are driven.
 TOGGLE_DOMAINS = {"switch", "fan", "input_boolean"}
+# FanEntityFeature.SET_SPEED. A fan with it gets a speed slider: it is
+# classed Dimmable, and the firmware maps its "percentage" to the level.
+FAN_SET_SPEED = 1
 LIGHT_DOMAIN = "light"
 # Domains that behave as "run this", i.e. the Automations screen.
 ACTION_DOMAINS = {"scene", "script", "automation"}
@@ -174,6 +177,8 @@ async def connect(url, token):
 def classify(state):
     """Return EntityKind name, or None if the panel cannot drive it."""
     domain = state["entity_id"].split(".", 1)[0]
+    if domain == "fan" and int(state.get("attributes", {}).get("supported_features") or 0) & FAN_SET_SPEED:
+        return "Dimmable"
     if domain in TOGGLE_DOMAINS:
         return "Toggle"
     if domain == LIGHT_DOMAIN:
@@ -432,7 +437,7 @@ def build_header(area_names, rows, acts, sensor_rows):
     return "\n".join(out)
 
 
-def build_layout(area_names, rows, acts, sensor_rows, theme=None):
+def build_layout(area_names, rows, acts, sensor_rows, theme=None, action_colors=None):
     """The delivery format: what gets pushed to the panel and stored.
 
     Deliberately terse - short keys, no whitespace when serialised -
@@ -450,7 +455,11 @@ def build_layout(area_names, rows, acts, sensor_rows, theme=None):
              "fav": fav, "icon": icon}
             for eid, name, kind, area, fav, icon in rows
         ],
-        "actions": [{"id": eid, "name": name} for eid, name in acts],
+        # "color" only where one was chosen: "#RRGGBB", drawn as that
+        # automation's button. The compiled header carries none.
+        "actions": [dict({"id": eid, "name": name},
+                         **({"color": action_colors[eid].upper()} if (action_colors or {}).get(eid) else {}))
+                    for eid, name in acts],
         "sensors": [
             {"id": eid, "area": area, "hum": is_hum}
             for eid, area, is_hum in sensor_rows

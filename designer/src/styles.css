@@ -205,3 +205,10 @@ button.small { padding: 2px 8px; font-size: 12px; }
   border: 1px dashed var(--line); border-radius: 6px; }
 .add-page { display: grid; grid-template-columns: 1fr auto; gap: 6px; margin-top: 8px; }
 .add-page .fit-note { grid-column: 1 / -1; padding: 0; }
+
+/* ---- automations: full-width names, a colour per button ---- */
+.ent.auto-row { grid-template-columns: 20px minmax(0, 1fr) auto; }
+.auto-colour { display: flex; align-items: center; gap: 6px; }
+.auto-colour input[type=color] { width: 30px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: none; }
+.auto-colour input[type=color]:not(.set) { opacity: 0.5; }
+.auto-colour .soft { width: 34px; }

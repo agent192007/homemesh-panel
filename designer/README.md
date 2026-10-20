@@ -26,7 +26,9 @@ time, or via **Choose project folder…** in the Layout card.
   and lists every entity the panel can drive, grouped by room.
 - **Entities**: tick to place, star for the Home page, pick an icon from
   the panel's own glyphs. Scenes, scripts and automations go on the
-  Automations screen (swipe up on the panel).
+  Automations screen (swipe up on the panel), each with **its own button
+  colour** if you pick one. Fans that support speed get a **speed
+  slider**, like a dimmable light (needs the 21 Oct firmware).
 - **Pages**: every device has a page chooser, starting at its Home
   Assistant room. Put it on another page, **add your own pages**, rename
   any page (click its name), or drag a tile onto another page; arrows

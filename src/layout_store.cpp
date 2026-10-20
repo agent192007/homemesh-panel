@@ -172,6 +172,7 @@ static void load_builtin() {
   for (uint8_t i = 0; i < HA_ACTION_COUNT; i++) {
     g_layout.acts[i].id = HA_ACTIONS[i].id;
     g_layout.acts[i].name = HA_ACTIONS[i].name;
+    g_layout.acts[i].has_color = false;   // colours travel only in pushed layouts
   }
 
   g_layout.sens_n = HA_SENSOR_COUNT;
@@ -314,6 +315,9 @@ static bool populate(JsonObjectConst root) {
     d.id = intern(id);
     d.name = intern(a["name"]);
     if (!d.id || !d.name) return false;
+    // Optional, and lenient like the theme: a malformed colour costs
+    // the button its colour, not the layout.
+    d.has_color = colour_from(a["color"], &d.color);
     g_layout.act_n++;
   }
 

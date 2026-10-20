@@ -92,6 +92,33 @@ roomless light on a new page, rename a room page and its sensor follows,
 save, reload with nothing dirty, remove a page) and on the simulator's
 render. The paper and the tkinter tool still describe pages as rooms.
 
+**21 Oct: fan speed, automation colours, demo automations.** At the
+user's request. **Firmware changed again and is NOT on the board** (no
+serial port; the board was unplugged). Built for all envs (env:ha static
+RAM 123,200 B, +176), saved as `../homemesh_ha_firmware_21oct.bin`
+(app only, SHA-256 `974b4a0d...`), verified in the simulator.
+- **Fans with `supported_features & 1` (SET_SPEED) are `Dimmable`**, in
+  both `classify()`s. The firmware reads HA's `percentage` (0-100, null
+  when off; null/0 keeps the last level like a light) and sends
+  `fan.set_percentage`; the entities filter gained `percentage` in both
+  branches (it logs `ENTITIES FILTER OVERFLOWED` if that ever stops
+  fitting - check the boot log after flashing). `EntityDesc.fan` makes
+  the detail slider say "Speed". **Old firmware + a pushed speed fan =
+  brightness sent to a fan, which HA rejects** - flash before pushing.
+- **Actions may carry `"color":"#RRGGBB"`**, only when chosen
+  (`build_layout(..., action_colors=)` / `buildLayout(t, theme, colors)`;
+  the header carries none, like the theme). Lenient in the firmware:
+  a bad colour costs the button its colour. Text on it is dark or white
+  by brightness. Automation labels now wrap to two lines then "..." -
+  they used to have no height, so LONG_DOT never cut.
+- HA now has 2 scenes, 2 scripts, 2 automations (in `C:\homeassistant`
+  `scenes.yaml` / `scripts.yaml` / `automations.yaml`), made through the
+  config API and each run and checked. Welcome Home fires when
+  `input_boolean.panel_demo_switch` goes off -> on.
+- The test fixture gained fans' `supported_features` and the six
+  actions (friendly names only). `tests/slider_probe.mjs` presses the
+  detail slider in the simulator and prints the command sent.
+
 Toolchain facts found on 20 Oct, all on this laptop:
 - **Emscripten SDK at `D:\Projects\emsdk`** (outside the repo). This
   emsdk ships `emcc.exe`, not `emcc.bat`; `sim/build.py` calls it by

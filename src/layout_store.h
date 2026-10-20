@@ -40,6 +40,8 @@ struct LayoutEntity {
 struct LayoutAction {
   const char *id;
   const char *name;
+  bool has_color;      // "color" given in the layout
+  uint32_t color;      // 0xRRGGBB
 };
 
 struct LayoutSensor {

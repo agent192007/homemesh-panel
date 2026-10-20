@@ -109,6 +109,16 @@ static void apply_entity_state(uint8_t i, const char *state, JsonVariantConst at
   if (g_layout.ents[i].kind == EntityKind::Toggle) return;
   if (attrs.isNull()) return;
 
+  // A fan's speed is "percentage", 0-100, and null while it is off; the
+  // UI's level is 0-255 as for a light. Null or 0 keeps the last speed,
+  // drawn muted, the way an off light keeps its brightness.
+  if (strncmp(g_layout.ents[i].id, "fan.", 4) == 0) {
+    JsonVariantConst p = attrs["percentage"];
+    if (!p.isNull() && p.as<int>() > 0)
+      post(EventType::Brightness, i, constrain((p.as<int>() * 255 + 50) / 100, 1, 255));
+    return;
+  }
+
   JsonVariantConst b = attrs["brightness"];
   if (!b.isNull()) post(EventType::Brightness, i, constrain(b.as<int>(), 0, 255));
 
@@ -308,10 +318,12 @@ static void handle_entities_event(uint8_t *payload, size_t len) {
   add["s"] = true;
   add["a"]["brightness"] = true;
   add["a"]["rgb_color"] = true;
+  add["a"]["percentage"] = true;      // fan speed
   JsonObject chg = filter["event"]["c"]["*"]["+"].to<JsonObject>();
   chg["s"] = true;
   chg["a"]["brightness"] = true;
   chg["a"]["rgb_color"] = true;
+  chg["a"]["percentage"] = true;
   if (filter.overflowed())
     Serial.println("[ha] ENTITIES FILTER OVERFLOWED - increase its size");
 
@@ -510,8 +522,15 @@ static void run_command(const Command &c) {
       break;
 
     case EventType::Brightness:
-      snprintf(data, sizeof(data), "{\"brightness\":%d}", (int)c.value);
-      send_service(domain, "turn_on", eid, data);
+      if (strcmp(domain, "fan") == 0) {
+        // Fans take a speed in percent; 1 at least, since 0 means off.
+        int pct = ((int)c.value * 100 + 127) / 255;
+        snprintf(data, sizeof(data), "{\"percentage\":%d}", pct < 1 ? 1 : pct);
+        send_service(domain, "set_percentage", eid, data);
+      } else {
+        snprintf(data, sizeof(data), "{\"brightness\":%d}", (int)c.value);
+        send_service(domain, "turn_on", eid, data);
+      }
       break;
 
     case EventType::Color:
@@ -660,9 +679,13 @@ void transport_start() {
     entities[i].area = g_layout.ents[i].area;
     entities[i].favourite = g_layout.ents[i].favourite;
     entities[i].icon = g_layout.ents[i].icon;
+    entities[i].fan = strncmp(g_layout.ents[i].id, "fan.", 4) == 0;
   }
-  for (uint8_t i = 0; i < g_layout.act_n; i++)
+  for (uint8_t i = 0; i < g_layout.act_n; i++) {
     automations[i].name = g_layout.acts[i].name;
+    automations[i].has_color = g_layout.acts[i].has_color;
+    automations[i].color = g_layout.acts[i].color;
+  }
 
   if (!WIFI_SSID[0] || !HA_HOST[0] || !HA_TOKEN[0])
     Serial.println("[ha] WIFI_SSID / HA_HOST / HA_TOKEN empty - fill in include/secrets.h");

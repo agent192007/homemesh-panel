@@ -6,6 +6,7 @@
 // events arrive from JavaScript (sim_event) and commands leave to
 // JavaScript (sim_on_command) - which forwards them to Home Assistant
 // when the designer is in live mode. dashboard.cpp cannot tell.
+#include <cstring>
 #include <deque>
 #include <emscripten.h>
 
@@ -31,9 +32,13 @@ void transport_start() {
     entities[i].area = g_layout.ents[i].area;
     entities[i].favourite = g_layout.ents[i].favourite;
     entities[i].icon = g_layout.ents[i].icon;
+    entities[i].fan = strncmp(g_layout.ents[i].id, "fan.", 4) == 0;
   }
-  for (uint8_t i = 0; i < g_layout.act_n; i++)
+  for (uint8_t i = 0; i < g_layout.act_n; i++) {
     automations[i].name = g_layout.acts[i].name;
+    automations[i].has_color = g_layout.acts[i].has_color;
+    automations[i].color = g_layout.acts[i].color;
+  }
 }
 
 bool transport_next_event(PanelEvent *e) {
