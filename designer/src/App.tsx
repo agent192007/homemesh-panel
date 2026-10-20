@@ -1,0 +1,332 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { bridge } from "./bridge";
+import { HaClient } from "./ha/haClient";
+import {
+  buildHeader, buildInventory, buildLayout, dumpLayout, ICON_NAMES, Inventory, Layout,
+  LAYOUT_EVENT, LAYOUT_MAX_JSON, MAX_ENTITIES, MAX_PER_PAGE, selectLayout, THEME_DEFAULTS,
+} from "./layout/format";
+import { Ev, Link, SimEvent } from "./sim/events";
+import { PanelSimulator, PanelSimulatorHandle } from "./sim/PanelSimulator";
+
+type Status = { kind: "idle" | "busy" | "ok" | "error"; text: string };
+interface Sel { include: Set<string>; favourite: Set<string>; order: string[]; icons: Record<string, string> }
+interface LiveState { s?: string; brightness?: number | null; rgb?: number[] | null }
+
+const THEME_LABELS: Record<string, string> = {
+  bg: "Background", tile: "Tile", on: "On", accent: "Accent", text: "Text",
+  muted: "Muted", ok: "Link ok", warn: "Link warn", bad: "Link down",
+};
+
+function useDebounced<T>(value: T, ms: number): T {
+  const [v, setV] = useState(value);
+  useEffect(() => { const t = setTimeout(() => setV(value), ms); return () => clearTimeout(t); }, [value, ms]);
+  return v;
+}
+
+export default function App() {
+  const [url, setUrl] = useState(() => localStorage.getItem("ha_url") ?? "http://localhost:8123");
+  const [token, setToken] = useState("");
+  const [status, setStatus] = useState<Status>({ kind: "idle", text: "not connected" });
+  const [client, setClient] = useState<HaClient | null>(null);
+  const [inv, setInv] = useState<Inventory | null>(null);
+  const [sel, setSel] = useState<Sel>({ include: new Set(), favourite: new Set(), order: [], icons: {} });
+  const [theme, setTheme] = useState<Record<string, string>>({ ...THEME_DEFAULTS });
+  const [saved, setSaved] = useState<Layout | null>(null);
+  const [live, setLive] = useState(false);
+  const [search, setSearch] = useState("");
+  const [logs, setLogs] = useState<string[]>([]);
+  const [verdict, setVerdict] = useState<{ ok: boolean; reason: string } | null>(null);
+  const [toast, setToast] = useState<Status | null>(null);
+  const sim = useRef<PanelSimulatorHandle>(null);
+  const liveStates = useRef<Map<string, LiveState>>(new Map());
+  const designStates = useRef<Map<number, SimEvent[]>>(new Map());
+
+  const log = useCallback((line: string) => setLogs((l) => [...l.slice(-300), line]), []);
+  const flash = (s: Status) => { setToast(s); setTimeout(() => setToast(null), 4000); };
+
+  // ---------------------------------------------------------------- start
+  useEffect(() => {
+    (async () => {
+      const env = await bridge.loadEnv();
+      if (env.url) setUrl(env.url);
+      if (env.token) setToken(env.token);
+      const raw = await bridge.loadLayout();
+      if (raw) {
+        const l: Layout = JSON.parse(raw);
+        setSaved(l);
+        setSel({
+          include: new Set(l.entities.map((e) => e.id)),
+          favourite: new Set(l.entities.filter((e) => e.fav).map((e) => e.id)),
+          order: l.entities.map((e) => e.id),
+          icons: Object.fromEntries(l.entities.map((e) => [e.id, e.icon])),
+        });
+        setTheme({ ...THEME_DEFAULTS, ...(l.theme ?? {}) });
+      }
+      if (env.url && env.token) connect(env.url, env.token);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function connect(u = url, t = token) {
+    client?.close();
+    setStatus({ kind: "busy", text: "connecting…" });
+    try {
+      const c = await HaClient.connect(u, t, () => { setClient(null); setLive(false); setStatus({ kind: "error", text: "disconnected" }); });
+      const [states, areas, ents, devs] = await Promise.all([
+        c.cmd("get_states"), c.cmd("config/area_registry/list"),
+        c.cmd("config/entity_registry/list"), c.cmd("config/device_registry/list"),
+      ]);
+      const inventory = buildInventory(states, areas, ents, devs);
+      localStorage.setItem("ha_url", u);
+      setClient(c);
+      setInv(inventory);
+      setStatus({ kind: "ok", text: `connected · ${inventory.controllable.length} controllable, ${inventory.sensors.length} sensors` });
+    } catch (e) {
+      setStatus({ kind: "error", text: (e as Error).message });
+    }
+  }
+
+  // ----------------------------------------------------------- the layout
+  const tables = useMemo(() => inv ? selectLayout(inv, {
+    include: sel.include, favourite: sel.favourite, automations: new Set(), order: sel.order, icons: sel.icons,
+  }) : null, [inv, sel]);
+  const layout: Layout | null = useMemo(() => tables ? buildLayout(tables, theme) : saved, [tables, theme, saved]);
+  const json = useMemo(() => (layout ? dumpLayout(layout) : ""), [layout]);
+  const simJson = useDebounced(json, 250);
+  const bytes = new TextEncoder().encode(json).length;
+
+  // State the network task would deliver after connecting; replayed into
+  // every fresh simulator instance.
+  const bootEvents = useCallback((): SimEvent[] => {
+    if (!layout) return [];
+    const ev: SimEvent[] = [{ type: Ev.Link, entity: 0, value: Link.Online }, { type: Ev.DevicesAvailable, entity: 0, value: 1 }];
+    layout.entities.forEach((e, i) => {
+      if (live) ev.push(...stateEvents(i, liveStates.current.get(e.id)));
+      else ev.push(...(designStates.current.get(i) ?? [{ type: Ev.Power, entity: i, value: 0 }]));
+    });
+    if (live) layout.sensors.forEach((s) => {
+      const v = parseFloat(liveStates.current.get(s.id)?.s ?? "");
+      if (!Number.isNaN(v)) ev.push({ type: s.hum ? Ev.Humidity : Ev.Temperature, entity: s.area, value: 0, fvalue: v });
+    });
+    return ev;
+  }, [layout, live]);
+
+  // ---------------------------------------------------------------- live
+  useEffect(() => {
+    if (!live || !client || !layout) return;
+    const ids = [...layout.entities.map((e) => e.id), ...layout.sensors.map((s) => s.id)];
+    let unsub: (() => void) | null = null;
+    client.subscribe("subscribe_entities", { entity_ids: ids }, (event) => {
+      const apply = (eid: string, body: any) => {
+        if (!body) return;
+        const st = { ...(liveStates.current.get(eid) ?? {}) };
+        if (body.s !== undefined) st.s = body.s;
+        if (body.a && "brightness" in body.a) st.brightness = body.a.brightness;
+        if (body.a && "rgb_color" in body.a) st.rgb = body.a.rgb_color;
+        liveStates.current.set(eid, st);
+        const i = layout.entities.findIndex((e) => e.id === eid);
+        if (i >= 0) for (const e of stateEvents(i, { s: body.s, brightness: body.a?.brightness, rgb: body.a?.rgb_color })) sim.current?.post(e);
+        layout.sensors.forEach((s) => {
+          const v = parseFloat(body.s);
+          if (s.id === eid && !Number.isNaN(v)) sim.current?.post({ type: s.hum ? Ev.Humidity : Ev.Temperature, entity: s.area, value: 0, fvalue: v });
+        });
+      };
+      for (const [eid, body] of Object.entries(event.a ?? {})) apply(eid, body);
+      for (const [eid, body] of Object.entries(event.c ?? {})) apply(eid, (body as any)["+"]);
+    }).then((u) => { unsub = u; }).catch((e) => log(`[designer] live subscribe failed: ${e.message}`));
+    return () => { unsub?.(); };
+  }, [live, client, simJson]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A tap on the simulated panel. Live: the same service calls the
+  // firmware makes. Design: echoed straight back, like env:demo.
+  const onCommand = useCallback((kind: number, index: number, value: number) => {
+    if (!layout) return;
+    if (live && client) {
+      const ent = layout.entities[index];
+      if (!ent) return;
+      const domain = ent.id.split(".")[0];
+      const target = { entity_id: ent.id };
+      if (kind === Ev.Power) client.cmd("call_service", { domain, service: value ? "turn_on" : "turn_off", target });
+      else if (kind === Ev.Brightness) client.cmd("call_service", { domain, service: "turn_on", target, service_data: { brightness: value } });
+      else if (kind === Ev.Color) client.cmd("call_service", { domain, service: "turn_on", target, service_data: { rgb_color: [(value >> 16) & 255, (value >> 8) & 255, value & 255] } });
+      return;
+    }
+    const e = { type: kind, entity: index, value };
+    sim.current?.post(e);
+    const kept = (designStates.current.get(index) ?? []).filter((x) => x.type !== kind);
+    designStates.current.set(index, [...kept, e]);
+  }, [layout, live, client]);
+
+  // ------------------------------------------------------------- actions
+  async function push() {
+    if (!client || !layout) return;
+    try {
+      await client.cmd("fire_event", { event_type: LAYOUT_EVENT, event_data: { layout } });
+      flash({ kind: "ok", text: `Pushed ${bytes} bytes. The panel restarts into it; its serial log confirms.` });
+    } catch (e) { flash({ kind: "error", text: (e as Error).message }); }
+  }
+  async function save() {
+    if (!tables || !layout) return;
+    try {
+      const where = await bridge.saveLayout(json, buildHeader(tables));
+      flash({ kind: "ok", text: `Wrote ha_layout.json and ha_layout.h in ${where}` });
+    } catch (e) { flash({ kind: "error", text: (e as Error).message }); }
+  }
+
+  // -------------------------------------------------------------- picker
+  const groups = useMemo(() => {
+    if (!inv) return [];
+    const by = new Map<string, typeof inv.controllable>();
+    for (const r of inv.controllable) {
+      if (search && !(r.name + r.id).toLowerCase().includes(search.toLowerCase())) continue;
+      const k = r.area ?? "";
+      by.set(k, [...(by.get(k) ?? []), r]);
+    }
+    return [...by.entries()].map(([area, rows]) => ({ area, name: area ? inv.areaName[area] : "(no area)", rows }));
+  }, [inv, search]);
+
+  const toggle = (set: Set<string>, id: string) => { const n = new Set(set); n.has(id) ? n.delete(id) : n.add(id); return n; };
+  const pages = layout ? [{ name: "Home", ents: layout.entities.filter((e) => e.fav) }, ...layout.areas.map((a, i) => ({ name: a, ents: layout.entities.filter((e) => e.area === i) }))] : [];
+
+  // Drag within a room page: tile position is order within the page.
+  const dragId = useRef<string | null>(null);
+  const dropBefore = (targetId: string) => {
+    const from = dragId.current;
+    dragId.current = null;
+    if (!from || from === targetId || !layout) return;
+    const area = (id: string) => layout.entities.find((e) => e.id === id)?.area;
+    if (area(from) !== area(targetId)) return;
+    const order = layout.entities.map((e) => e.id).filter((id) => id !== from);
+    order.splice(order.indexOf(targetId), 0, from);
+    setSel((s) => ({ ...s, order }));
+  };
+
+  return (
+    <div className="app">
+      <header className="topbar">
+        <div className="brand">HomeMesh <span>Designer</span></div>
+        <input className="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://localhost:8123" />
+        <input className="token" type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="long-lived access token" />
+        <button onClick={() => connect()}>{client ? "Reconnect" : "Connect"}</button>
+        <span className={`status ${status.kind}`}>{status.text}</span>
+      </header>
+
+      <main className="cols">
+        <section className="col picker">
+          <div className="col-head">
+            <h2>Entities</h2>
+            <input className="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search" />
+          </div>
+          {!inv && <p className="hint">Connect to Home Assistant to choose what the panel shows. Until then the simulator runs the saved layout.</p>}
+          {groups.map((g) => (
+            <div key={g.area} className="group">
+              <h3>{g.name}{!g.area && <em> · no room in HA, cannot be placed</em>}</h3>
+              {g.rows.map((r) => {
+                const on = sel.include.has(r.id);
+                return (
+                  <div key={r.id} className={`ent ${on ? "on" : ""} ${g.area ? "" : "disabled"}`}>
+                    <input type="checkbox" checked={on} disabled={!g.area}
+                      onChange={() => setSel((s) => ({ ...s, include: toggle(s.include, r.id), order: s.order.includes(r.id) ? s.order : [...s.order, r.id] }))} />
+                    <button className={`star ${sel.favourite.has(r.id) ? "fav" : ""}`} title="Show on the Home page" disabled={!g.area}
+                      onClick={() => setSel((s) => ({ ...s, favourite: toggle(s.favourite, r.id) }))}>★</button>
+                    <div className="ent-name"><div>{r.name}</div><code>{r.id}</code></div>
+                    <span className={`kind ${r.kind}`}>{r.kind}</span>
+                    <select value={sel.icons[r.id] ?? ""} disabled={!g.area}
+                      onChange={(e) => setSel((s) => ({ ...s, icons: { ...s.icons, [r.id]: e.target.value } }))}>
+                      <option value="">auto</option>
+                      {ICON_NAMES.map((n) => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </section>
+
+        <section className="col center">
+          <div className="sim-head">
+            <h2>Panel</h2>
+            <span className="sim-note">the firmware's own LVGL UI, running as WebAssembly · drag to swipe pages</span>
+            <label className={`live ${live ? "on" : ""}`} title={client ? "" : "connect first"}>
+              <input type="checkbox" checked={live} disabled={!client} onChange={(e) => setLive(e.target.checked)} />
+              Live states
+            </label>
+          </div>
+          {simJson
+            ? <PanelSimulator ref={sim} layoutJson={simJson} bootEvents={bootEvents} onCommand={onCommand}
+                onLog={log} onLayoutResult={(ok, reason) => setVerdict({ ok, reason })} />
+            : <div className="sim-empty">No layout yet</div>}
+          <p className="sim-help">{live
+            ? "Live: states come from Home Assistant, and taps really switch the devices."
+            : "Design: taps change the simulator only. Turn on Live states to drive real devices."}</p>
+          <div className="log">
+            <div className="log-head">Panel serial log</div>
+            <pre>{logs.join("\n")}</pre>
+          </div>
+        </section>
+
+        <section className="col side">
+          <div className="card">
+            <h2>Pages</h2>
+            <p className="hint">Drag to reorder within a room. A tile's position is its order on the page; Home follows the rooms.</p>
+            {pages.map((p, pi) => (
+              <div key={p.name + pi} className="page">
+                <h3>{p.name} <span>{p.ents.length}/{MAX_PER_PAGE}</span></h3>
+                {p.ents.map((e) => (
+                  <div key={e.id} className={`tile-row ${pi === 0 ? "fixed" : ""}`} draggable={pi > 0}
+                    onDragStart={() => { dragId.current = e.id; }}
+                    onDragOver={(ev) => ev.preventDefault()} onDrop={() => dropBefore(e.id)}>
+                    <span className="grip">{pi > 0 ? "⋮⋮" : ""}</span>{e.name}<code>{e.icon}</code>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+
+          <div className="card">
+            <h2>Colours</h2>
+            <div className="swatches">
+              {Object.keys(THEME_DEFAULTS).map((k) => (
+                <label key={k} className="swatch">
+                  <input type="color" value={theme[k]} onChange={(e) => setTheme((t) => ({ ...t, [k]: e.target.value.toUpperCase() }))} />
+                  <span>{THEME_LABELS[k]}</span>
+                </label>
+              ))}
+            </div>
+            <button className="ghost" onClick={() => setTheme({ ...THEME_DEFAULTS })}>Reset to defaults</button>
+          </div>
+
+          <div className="card">
+            <h2>Layout</h2>
+            <div className="meter"><div style={{ width: `${Math.min(100, bytes / LAYOUT_MAX_JSON * 100)}%` }} className={bytes > LAYOUT_MAX_JSON ? "over" : ""} /></div>
+            <div className="facts">
+              <span>{bytes} / {LAYOUT_MAX_JSON} bytes</span>
+              <span>{layout?.entities.length ?? 0} / {MAX_ENTITIES} entities</span>
+              <span>{layout?.areas.length ?? 0} rooms</span>
+            </div>
+            {verdict && (verdict.ok
+              ? <div className="verdict ok">✓ Accepted by the firmware's validator</div>
+              : <div className="verdict bad">✗ The panel would reject this: {verdict.reason}</div>)}
+            {tables?.notes.map((n) => <div key={n} className="note">{n}</div>)}
+            <div className="actions">
+              <button onClick={save} disabled={!tables}>Save to project</button>
+              <button className="primary" onClick={push} disabled={!client || !layout || verdict?.ok === false}>Push to panel</button>
+            </div>
+          </div>
+        </section>
+      </main>
+      {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
+    </div>
+  );
+}
+
+// Power/Brightness/Color events for one entity, as the firmware's
+// apply_entity_state() posts them: state optional, null brightness kept.
+function stateEvents(i: number, st?: LiveState): SimEvent[] {
+  if (!st) return [];
+  const ev: SimEvent[] = [];
+  if (st.s !== undefined) ev.push({ type: Ev.Power, entity: i, value: st.s === "on" ? 1 : 0 });
+  if (st.brightness != null) ev.push({ type: Ev.Brightness, entity: i, value: Math.max(0, Math.min(255, st.brightness)) });
+  if (Array.isArray(st.rgb) && st.rgb.length >= 3) ev.push({ type: Ev.Color, entity: i, value: (st.rgb[0] << 16) | (st.rgb[1] << 8) | st.rgb[2] });
+  return ev;
+}

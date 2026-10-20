@@ -347,10 +347,12 @@ Limits, if asked: 12 devices, 6 rooms, 6 devices per page.
 
 ## 9. What is not finished
 
-- **The layout designer is being rebuilt** as a proper application with a
-  real LVGL simulator, so its preview runs the panel's own interface code
-  instead of a lookalike. Started 20 October, after the paper's freeze;
-  the paper describes the current tkinter designer.
+- **A new layout designer** (`designer/`, Electron) works as of 20
+  October: its preview is the panel's own interface code compiled to
+  WebAssembly — a real LVGL simulator, not a lookalike — and its Live
+  mode drives real devices from the simulated screen. Not yet packaged
+  as an installer. The paper, frozen before this, describes the earlier
+  tkinter designer, which still works.
 - **MQTT has not been removed.** Unused, but deleting it also deletes a
   working fallback.
 - **The microSD card has never been tested.**

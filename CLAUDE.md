@@ -13,6 +13,52 @@ demo over elegance — and at this point, prioritise the report over new
 capability, because the engineering is essentially where this file says
 it should be and the report is not.
 
+## Added 20 Oct — the new designer
+
+**`designer/`: an Electron + React + TypeScript app replacing the
+tkinter designer, with a real LVGL simulator.** Working end to end on
+20 Oct: connects to HA, picker, favourites, icons, drag reorder, theme,
+save, push, and **Live states** — verified in the running app by
+tapping the simulated Bed Light tile and watching HA's real light turn
+on (brightness 102), then off. See `designer/README.md`.
+
+- The preview is the firmware's own `ui/dashboard.cpp` + LVGL 8.3.11 +
+  icon fonts + `layout_store.cpp`, compiled to WebAssembly by
+  `sim/build.py` against `include/lv_conf.h`. `sim/` adds only a
+  transport, an entry point and two Arduino shims; **nothing in `src/`
+  is forked**. Output `designer/src/sim/panel_sim.mjs` is committed, so
+  the app builds without Emscripten.
+- Applying a layout re-instantiates the module — the simulator's
+  restart, mirroring the board. The firmware's validator runs on every
+  edit: "Accepted by the firmware's validator" in the app is literal.
+- `designer/src/layout/format.ts` ports `tools/ha_discover.py`;
+  `npm test` requires byte-identical layout JSON **and** `ha_layout.h`
+  against the Python on a stored HA snapshot. Python stays the
+  reference — change the format there first.
+- The tkinter `tools/layout_designer.py` stays: the paper (due 21 Oct)
+  describes it, and the paper was frozen before this started.
+- Not done: packaging (`npm run dist` is configured for an
+  electron-builder portable exe, never run); room (page) reordering;
+  automations in the UI.
+- **The simulator found a real panel bug:** a tile name that needs two
+  or three lines ("Ceiling Lights", "Living Room RGBWW Lights") wraps
+  down into the icon disc. `dashboard.cpp` sets the name label's width
+  and `LV_LABEL_LONG_DOT` but no height, so it wraps instead of
+  truncating. One-line fix (give the label one line's height). Not
+  applied — firmware frozen at `v0.4-firmware-freeze` for the demo.
+
+Toolchain facts found on 20 Oct, all on this laptop:
+- **Emscripten SDK at `D:\Projects\emsdk`** (outside the repo). This
+  emsdk ships `emcc.exe`, not `emcc.bat`; `sim/build.py` calls it by
+  absolute path with `EM_CONFIG` set — no `emsdk_env` needed.
+- **npm 11 blocks install scripts**, so Electron's binary never
+  downloads on `npm install`. Run `node node_modules/electron/install.js`.
+- **VS Code sets `ELECTRON_RUN_AS_NODE=1`** in its terminals; Electron
+  then runs as plain Node and fails with "does not provide an export
+  named 'BrowserWindow'". Unset it to launch.
+- Node 26 runs `.ts` directly (`--experimental-strip-types`) but not
+  constructor parameter properties — keep shared TS strip-compatible.
+
 ## Pick up here (18 Oct)
 
 Three days to the 21st. **The firmware is done — freeze it.** The
@@ -646,7 +692,7 @@ the firmware was written:
   is ~5 KB, but an entity with an enormous attribute (a WLED light with
   a hundred effects) could push a snapshot over.
 
-### 2. Desktop tool GUI — done 15 Oct
+### 2. Desktop tool GUI — done 15 Oct (superseded 20 Oct by `designer/`)
 
 `tools/layout_designer.py`. Entity picker grouped by area, Home-page
 favourites, a 320x240 preview at 2x, drag to reorder, writes both

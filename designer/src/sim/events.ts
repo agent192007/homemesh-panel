@@ -1,0 +1,16 @@
+// EventType from src/panel_model.h - the vocabulary between the
+// transport and the UI. The simulator and its JavaScript share it.
+export const Ev = {
+  Link: 0,
+  DevicesAvailable: 1,
+  Power: 2,
+  Brightness: 3,
+  Color: 4,
+  Temperature: 5,
+  Humidity: 6,
+  AutomationRan: 7,
+} as const;
+
+export const Link = { NoWifi: 0, NoBroker: 1, Online: 2 } as const;
+
+export interface SimEvent { type: number; entity: number; value: number; fvalue?: number }
