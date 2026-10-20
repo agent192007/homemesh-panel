@@ -6,7 +6,8 @@ talking to Home Assistant. Local-first, no cloud.
 Academic project, VIT Chennai. Carries 70% of the grade.
 
 **The 70% review is done and went well.** What remains is the final
-review and submission, **22 October** (moved from the 20th on 17 Oct).
+review and submission. **The paper is due 21 October** (the user's
+date, given 18 Oct; earlier notes said the 22nd, then the 20th).
 Prioritise an impressive working
 demo over elegance — and at this point, prioritise the report over new
 capability, because the engineering is essentially where this file says
@@ -14,18 +15,18 @@ it should be and the report is not.
 
 ## Pick up here (18 Oct)
 
-Four days. **The firmware is done — freeze it.** Everything left
-except the report is small, and the report is what gets graded. In
-order:
+Three days to the 21st. **The firmware is done — freeze it.** The
+paper is drafted; what is left is review and small items. In order:
 
-1. **Add a Band Selection check to `tools/preflight.ps1`.** The demo
-   depends on the laptop's WiFi card being pinned to "2.4G Only" (see
-   Deployment network), and a driver update can quietly reset it to
-   Dual Band. Not written yet.
-2. **Update the report material.** `docs/` describes a version of this
-   project that no longer exists — see "What is left" item 4. The
-   title page needs team members, register numbers, faculty guide and
-   submission date from the user; leave them blank until given.
+1. ~~Band Selection check in `tools/preflight.ps1`~~ — done 18 Oct.
+   It also reads the entity list from `include/ha_layout.json` now
+   (the hand-typed list had gone stale), and an unreachable HA no
+   longer reads as "entities missing".
+2. **The IEEE paper — drafted 18 Oct, 6 pages.** See "What is left"
+   item 4 for the spec and how to rebuild it. Left: the team reads it;
+   swap in the teacher's shared template if the user finds it (none
+   was on this machine); optionally a photo of the real panel for
+   Fig. 4, which is currently the designer's preview.
 3. Optional, offered 18 Oct, not started: **screenshots straight from
    the panel.** Stream the LVGL frame buffer over serial from the flush
    callback and rebuild a PNG on the laptop (~15 s per capture at
@@ -302,7 +303,8 @@ Added since, on 15-16 Oct:
 **The largest frame is now the `subscribe_entities` snapshot: 2536
 bytes for 7 entities** (18 Oct) — still the PC/ESP32 split doing its
 job, against the hundreds of KB a `get_states` would cost. A layout
-push frame is ~890 bytes. The WebSockets library drops any frame over
+push frame is 955 bytes for the 700-byte 5-entity layout (18 Oct; it
+was ~890 for an older layout). The WebSockets library drops any frame over
 15 KB; see "What is left" 1e.
 
 ## Toolchain
@@ -690,11 +692,53 @@ helper replace the simulated entities, so nothing needs the broker.
 
 Cleanup rather than new capability, but it shrinks what can break.
 
-### 4. Report and demo material — the real gap now
+### 4. Report and demo material — the paper is drafted
 
-**This is the thing being graded on the 22nd, and it is the least
-current part of the project.** `docs/` was written on 17 Sep and
-describes a version of this project that no longer exists.
+**What the faculty asked for (given 18 Oct):** an IEEE conference
+format paper, **6 pages, as a Word document**: abstract, keywords,
+introduction, methodology (with a block diagram), results and
+discussion, conclusion, references — **15 to 18 recent papers or
+journal articles**. All authors named, **Pranesh S last**. Faculty
+guide: **Suhasini S** (in the Acknowledgment, not the author list —
+the user asked for their own name last). Due **21 Oct**.
+
+**`docs/paper/HomeMesh_IEEE_Paper.docx`** — drafted 18 Oct, exactly 6
+pages, ~4,080 words, 5 figures, 4 tables, 2 listings, 17 references.
+
+- Built by `python docs/paper/build_paper.py` (python-docx). Do not
+  hand-edit the .docx and then rebuild — the script overwrites it.
+  Change the text in the script.
+- `powershell -ExecutionPolicy Bypass -File docs\paper\check_pages.ps1`
+  has **Microsoft Word** open it, report the page count and export a
+  PDF beside it. Word is the only reliable judge of layout; check after
+  every edit, since the limit is 6.
+- Layout follows IEEE's A4 conference template from its published spec
+  (Times, 24 pt title, two columns, `Abstract—`/`Index Terms—`,
+  small-caps Roman headings, 8 pt references, balanced last page).
+  IEEE's site blocks scripted downloads of the real template, and the
+  teacher's shared format was not on this machine.
+- **Every reference was verified against Crossref** (the DOI registry)
+  — authors, venue, year, pages, DOI. Never add one that has not been;
+  a fabricated citation in a submitted paper is serious. Citations are
+  numbered by first use automatically, and the build fails if any
+  reference goes uncited.
+- **Every number in it was measured on 18 Oct**, not estimated:
+  `get_states` 57,671 B for 123 entities; snapshot 2,403 B for 7;
+  changes 144-262 B; a 700 B layout arrives as a 955 B event; snapshot
+  11.5 ms after subscribing; service call to state change 3.2 ms median
+  (server side, 10 trials); panel RTT 40 ms, 0% loss; firmware figures
+  from the boot log and the build report.
+- Figures: `docs/figures/paper_block_diagram.py` (Fig. 1) and
+  `docs/figures/paper_figures.py` (sequence, message sizes) draw from
+  code; `docs/paper/fig_designer.png` is a real screenshot of the
+  connected designer; `fig_ui_pages.png` is the designer's preview,
+  captioned as such.
+- Author block carries register numbers: Garima Nidhi 24BCE1782,
+  Taniska Routray 24BCE1578, Bharadhwaj 24BCE1959, Pranesh S 24BCE5138.
+  Affiliation "School of Computer Science and Engineering, VIT,
+  Chennai" was assumed from the BCE register numbers — confirm.
+
+The older material below is now secondary to the paper.
 
 What exists today:
 
@@ -718,8 +762,17 @@ What is stale in all of them:
 - No mention of the **microSD card**, which is physically on the board.
 - Nothing on the **icons**, the **tile look**, or the move to
   **`subscribe_entities`** (1c-1e).
-- The title page still has blanks: team members, register numbers,
-  faculty guide, submission date.
+- The title page still has blanks. Team, given 18 Oct:
+
+  | Name             | Register number          |
+  |------------------|--------------------------|
+  | Pranesh S        | 24BCE5138                |
+  | Garima Nidhi     | 24BCE1782                |
+  | Taniska Routray  | *(not yet given — blank)* |
+  | Bharadhwaj       | 24BCE1959                |
+
+  Still blank: Taniska's register number, faculty guide, submission
+  date.
 
 Worth a section of its own: the **18 Oct network diagnosis**. A fault
 that looked like random firmware flakiness — timeouts, reconnect
@@ -806,8 +859,9 @@ on the laptop goes offline.
 - **`tools/preflight.ps1`** checks the things that do not survive a
   reboot — hotspot, firewall path, container, HA reachable on the
   hotspot address, token valid, every layout entity still present. Run
-  it from cold before demoing. Exits with the number of failures. It
-  does **not** yet check that the WiFi card is pinned to 2.4G Only.
+  it from cold before demoing. Exits with the number of failures. Since
+  18 Oct it also checks the WiFi card is pinned to 2.4G Only, and takes
+  the entity list from `include/ha_layout.json`.
 - A healthy boot on the panel's serial log, 18 Oct — compare against
   this before suspecting anything else:
 
