@@ -40,7 +40,7 @@ OUT = HERE / "HomeMesh_Panel_Project_Documentation.docx"
 UPDATED = "20 October 2026"
 SUBMISSION = "21 October 2026"
 TEAM = [("Garima Nidhi", "24BCE1782"), ("Taniska Routray", "24BCE1578"),
-        ("Bharadhwaj", "24BCE1959"), ("Pranesh S", "24BCE5138")]
+        ("Bharadhwaj B", "24BCE1959"), ("Pranesh S", "24BCE5138")]
 GUIDE = "Suhasini S"
 
 FONT = "Calibri"
