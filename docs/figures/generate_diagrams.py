@@ -12,8 +12,9 @@ import math
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
-OUT = Path(__file__).resolve().parent / "img"
-OUT.mkdir(exist_ok=True)
+# The architecture diagrams sit beside this script (where the report and the
+# documentation build pick them up); img/ holds the paper's figures.
+OUT = Path(__file__).resolve().parent
 
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
@@ -124,16 +125,17 @@ def overall():
     tmid(d, W / 2, 58, "ARCHITECTURE - OVERALL SYSTEM DIAGRAM", F_TITLE)
 
     # ---------------- band 1: setup
-    d.text((70, 140), "SETUP PATH  -  runs on the laptop, once", font=F_BAND, fill=BLACK)
-    y, h, w = 210, 130, 320
+    d.text((70, 140), "SETUP PATH  -  runs on the laptop, whenever the layout changes",
+           font=F_BAND, fill=BLACK)
+    y, h, w = 260, 130, 320
     xs = [70, 490, 910, 1330, 1750]
     box(d, xs[0], y, w, h, ["home_assistant", "entity registry"])
-    box(d, xs[1], y, w, h, ["ha_discover_py", "discovery tool"])
-    box(d, xs[2], y, w, h, ["ha_layout_h", "generated header"])
-    box(d, xs[3], y, w, h, ["firmware_image", "PlatformIO build"])
-    box(d, xs[4], y, w, h, ["homemesh_panel", "flashed over USB"])
-    for i, lb in enumerate(["get_states", "entity_ids", "compiled in", "serial flash"]):
-        arrow(d, (xs[i] + w, y + h / 2), (xs[i + 1], y + h / 2), [lb], off=(0, -100))
+    box(d, xs[1], y, w, h, ["homemesh_designer", "desktop app"])
+    box(d, xs[2], y, w, h, ["layout_json", "~700 bytes"])
+    box(d, xs[3], y, w, h, ["home_assistant", "event bus"])
+    box(d, xs[4], y, w, h, ["layout_store", "validate, NVS"])
+    for i, lb in enumerate(["get_states", "pick, order, style", "fire_event", "homemesh_layout"]):
+        arrow(d, (xs[i] + w, y + h / 2), (xs[i + 1], y + h / 2), [lb], off=(0, -95))
 
     # ---------------- band 2: runtime
     d.text((70, 580), "RUNTIME PATH  -  continuous, while the panel is powered",
@@ -156,21 +158,22 @@ def overall():
     # the wireless hop gets the wide gap, so its labels have room
     gx = (b[2] + ws[2] + b[3]) / 2
     label(d, gx, y2 - 50, ["wifi_hotspot   192.168.137.1 : 8123"])
-    label(d, gx, y2 + h2 + 46, ["subscribe_trigger   (state in)",
+    label(d, gx, y2 + h2 + 46, ["subscribe_entities   (state in)",
                                 "call_service   (commands out)"])
 
     # user
     box(d, b[4], y2 + h2 + 190, ws[4], 120, ["user", "touch input"])
     arrow(d, (b[4] + ws[4] / 2, y2 + h2 + 190), (b[4] + ws[4] / 2, y2 + h2), None, both=True)
 
-    # layout feeds the runtime subscription — routed well clear of band 2
-    lx = xs[2] + w / 2
-    tx = b[3] + ws[3] / 2
+    # the stored layout decides what the runtime path subscribes to and draws
+    lx = xs[4] + w / 2
     d.line([(lx, y + h), (lx, 470)], fill=BLACK, width=LINE)
-    d.line([(lx, 470), (tx, 470)], fill=BLACK, width=LINE)
-    d.line([(tx, 470), (tx, y2)], fill=BLACK, width=LINE)
-    head(d, (tx, 470), (tx, y2))
-    label(d, (lx + tx) / 2, 470 - 30, ["the 9 entity_ids the panel subscribes to"])
+    d.line([(b[3] + ws[3] / 2, 470), (b[4] + ws[4] / 2, 470)], fill=BLACK, width=LINE)
+    for tx in (b[3] + ws[3] / 2, b[4] + ws[4] / 2):
+        d.line([(tx, 470), (tx, y2)], fill=BLACK, width=LINE)
+        head(d, (tx, 470), (tx, y2))
+    label(d, lx - 310, 470 - 32,
+          ["after a restart: which entity_ids, names, icons, colours"])
 
     im.save(OUT / "arch_overall.png")
 
@@ -218,9 +221,7 @@ def hardware():
     ]):
         d.text((nx + 26, ny + 80 + i * 40), ln, font=F_SUB, fill=GREY)
 
-    im.save(OUT / "arch_software_hw_tmp.png")
     im.save(OUT / "arch_hardware.png")
-    (OUT / "arch_software_hw_tmp.png").unlink(missing_ok=True)
 
 
 # --------------------------------------------------------------------
@@ -255,7 +256,7 @@ def software():
     arrow(d, (1140, 360), (1000, 360), None)
 
     # modules
-    box(d, 560, 580, 440, 130, ["ui_dashboard", "builds pages from table"])
+    box(d, 560, 580, 440, 130, ["ui_dashboard", "builds pages from layout"])
     box(d, 1720, 580, 460, 130, ["ha_client", "WebSocket state machine"])
     arrow(d, (780, 430), (780, 580), None)
     arrow(d, (1950, 440), (1950, 580), None)
@@ -269,21 +270,23 @@ def software():
     fan(d, (780, 710), [(x + 125, 850) for x in uix], 790)
 
     # client children
-    cl = [("ws_connect_auth", "auth_ok"), ("subscribe_trigger", "state in"),
+    cl = [("ws_connect_auth", "auth_ok"), ("subscribe_entities", "state in"),
           ("call_service", "commands out"), ("wifi_manager", "join + reconnect")]
     clx = [1399, 1678, 1957, 2236]
     for x, (nm, sub) in zip(clx, cl):
         box(d, x, 850, 265, 130, [nm, sub])
     fan(d, (1950, 710), [(x + 132, 850) for x in clx], 790)
 
-    # compile-time data
-    d.text((60, 1055), "COMPILE-TIME DATA  -  generated or configured, never runtime state",
+    # data the firmware is driven by
+    d.text((60, 1055), "DATA  -  the layout is read at boot; the rest is compiled in",
            font=F_BAND, fill=BLACK)
-    dat = [("panel_model_h", "PanelEvent, LinkState,", "EntityKind"),
-           ("ha_layout_h", "9 entity_ids,", "3 areas, 2 sensors"),
+    dat = [("layout_store", "NVS layout, validated;", "pushed via HA event"),
+           ("ha_layout_h", "compiled fallback,", "if NVS is empty"),
+           ("panel_theme", "nine colours,", "from the layout"),
+           ("panel_model_h", "PanelEvent, LinkState,", "EntityKind"),
            ("secrets_h", "SSID, HA host,", "access token")]
     for i, cols in enumerate(dat):
-        box(d, 560 + i * 460, 1110, 400, 150, list(cols), dashed=True)
+        box(d, 330 + i * 440, 1110, 400, 150, list(cols), dashed=(i >= 3))
 
     d.text((60, 1300),
            "network_task -> panel_event_queue -> lvgl_task. The queue keeps blocking network work off the "
@@ -296,5 +299,5 @@ overall()
 hardware()
 software()
 print("wrote:")
-for p in sorted(OUT.glob("*.png")):
+for p in sorted(OUT.glob("arch_*.png")):
     print("  ", p.name, p.stat().st_size, "bytes")
