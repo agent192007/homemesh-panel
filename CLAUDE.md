@@ -93,10 +93,12 @@ save, reload with nothing dirty, remove a page) and on the simulator's
 render. The paper and the tkinter tool still describe pages as rooms.
 
 **21 Oct: fan speed, automation colours, demo automations.** At the
-user's request. **Firmware changed again and is NOT on the board** (no
-serial port; the board was unplugged). Built for all envs (env:ha static
-RAM 123,200 B, +176), saved as `../homemesh_ha_firmware_21oct.bin`
-(app only, SHA-256 `974b4a0d...`), verified in the simulator.
+user's request. **On the board since 22 Oct** (flashed from the
+designer's new Panel firmware card, below; md5 verified by the board).
+Booted clean: 15,408 B pool free, 8,188 B stack free, no filter
+overflow. Built for all envs (env:ha static RAM 123,200 B, +176), also
+saved as `../homemesh_ha_firmware_21oct.bin` (app only, SHA-256
+`974b4a0d...`).
 - **Fans with `supported_features & 1` (SET_SPEED) are `Dimmable`**, in
   both `classify()`s. The firmware reads HA's `percentage` (0-100, null
   when off; null/0 keeps the last level like a light) and sends
@@ -118,6 +120,42 @@ RAM 123,200 B, +176), saved as `../homemesh_ha_firmware_21oct.bin`
 - The test fixture gained fans' `supported_features` and the six
   actions (friendly names only). `tests/slider_probe.mjs` presses the
   detail slider in the simulator and prints the command sent.
+
+**22 Oct: flashing from the designer.** A "Panel firmware" card flashes
+a display over USB with Web Serial (built into Electron) and esptool-js
+0.7.0 (Espressif's flasher in JS, stubs bundled - no network, no
+Python, no PlatformIO). Then it reopens the port, resets the board, shows
+its boot log, and when the panel logs `listening for homemesh_layout` it
+pushes the current layout and waits for the restart into it.
+- The image is **`firmware/homemesh_panel.bin`**, a whole-board merge
+  (bootloader 0x1000, partitions 0x8000, boot_app0 0xe000, app 0x10000)
+  written from 0x0, so it brings up a never-flashed display and **erases
+  NVS** (the stored layout). `tools/flash_image.py`, a post-build step on
+  `env:ha`, writes it plus `homemesh_panel.json` (built, commit, md5,
+  SSID and HA host - never the password or token) after every build.
+- **`firmware/` is gitignored and never bundled into the exe**: secrets.h
+  is compiled in. The designer reads it from the project folder; a
+  teammate without it must build once (`pio run -e ha`).
+- `select-serial-port` in `electron/main.ts` picks the first CH340 /
+  CP210x / FTDI / Espressif port automatically. Two boards plugged in at
+  once: it takes the first.
+- Verified on the real board 22 Oct: 1,270,976 B written in 10.9 s,
+  "Hash of data verified", booted the 21 Oct firmware on the compiled
+  layout. The packaged exe finds the image and has serial access.
+
+**Open on 22 Oct: the hotspot link to the panel is lossy.** The user
+reported the panel "does not connect back" after a push. Measured: the
+laptop's link to its router is clean (0% loss, 7 ms) but pings to the
+panel lose 50-75% at -27 to -46 dBm, replies 25-180 ms; on 18 Oct it was
+0% loss, 40 ms, same setup. On this link the WebSocket handshake takes
+minutes, so after any restart the panel looks dead for a long time; it
+does recover by itself (about 3 min after the 22 Oct flash). After the
+flash's hard reset the hotspot also dropped it once with `reason 6
+(NOT_AUTHED)` - its old association was never ended. Band Selection is
+still 2.4G Only. Channel unknown (netsh needs Location services). Not
+fixed. Candidate firmware changes, not made: `WiFi.disconnect()` before
+`ESP.restart()` on a push, and logging every reconnect (only the first
+`[wifi] connected` is printed, so a reconnected panel is silent).
 
 Toolchain facts found on 20 Oct, all on this laptop:
 - **Emscripten SDK at `D:\Projects\emsdk`** (outside the repo). This
@@ -239,9 +277,11 @@ canvas -> layout JSON -> pushed to the panel -> stored in NVS ->
 LVGL widgets built dynamically at boot. Firmware stays fixed; layout is
 data. All of this is written (`tools/layout_designer.py` and
 `src/layout_store.*`, 15 Oct) and proven on hardware (17 Oct).
-**Do not plan a reflash step** — that would require esptool, a
-toolchain and CH340 drivers on the user's machine, and breaks the
-"runs on any PC" goal.
+Layout changes never need a reflash. **Firmware changes can now be
+flashed from the designer** (22 Oct, user's request) with nothing
+installed - see "22 Oct: flashing from the designer" - which keeps the
+"runs on any PC" goal that this note used to protect by ruling flashing
+out.
 
 ## Hardware (confirmed on the actual board — do not re-derive)
 

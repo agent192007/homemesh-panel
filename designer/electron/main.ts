@@ -1,8 +1,9 @@
-// Electron main process: one window, and three narrow file operations
+// Electron main process: one window, and a few narrow file operations
 // exposed through the preload - read the HA credentials, read the saved
-// layout, write the layout files. Nothing else touches the disk.
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+// layout, write the layout files, read the panel firmware image. Nothing
+// else touches the disk. Also turns on Web Serial, for flashing a panel.
+import { app, BrowserWindow, dialog, ipcMain, session } from "electron";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -66,6 +67,45 @@ ipcMain.handle("layout:save", (_e, json: string, header: string) => {
   return join(root, "include");
 });
 
+// The whole-board image tools/flash_image.py writes after each env:ha
+// build. Read from the project, never bundled: secrets.h is compiled in.
+const FIRMWARE = ["firmware", "homemesh_panel.bin"];
+ipcMain.handle("firmware:info", () => {
+  const root = projectRoot();
+  if (!root) return { error: "Project folder not found." };
+  const bin = join(root, ...FIRMWARE);
+  if (!existsSync(bin)) return { error: "No firmware image yet: build it once with  pio run -e ha  (it writes firmware/homemesh_panel.bin)." };
+  let meta: Record<string, unknown> = {};
+  try { meta = JSON.parse(readFileSync(bin.replace(/\.bin$/, ".json"), "utf8")); } catch { /* described below */ }
+  return { path: bin, bytes: statSync(bin).size, ...meta };
+});
+ipcMain.handle("firmware:load", () => {
+  const root = projectRoot();
+  if (!root) throw new Error("Project folder not found.");
+  return new Uint8Array(readFileSync(join(root, ...FIRMWARE)));
+});
+
+// Web Serial. Chromium normally asks the user to pick a port; with no
+// browser chrome Electron hands the choice to us. Prefer the USB-serial
+// chips ESP32 boards use (CH340 on this panel, CP210x, FTDI, Espressif's
+// own), and remember which port was taken so the UI can say so.
+const USB_SERIAL_VIDS = ["1a86", "10c4", "0403", "303a"];
+let lastPort = "";
+function enableSerial() {
+  session.defaultSession.on("select-serial-port", (event, ports, _wc, callback) => {
+    event.preventDefault();
+    const vid = (p: Electron.SerialPort) => (p.vendorId ?? "").toLowerCase().padStart(4, "0");
+    const pick = ports.find((p) => USB_SERIAL_VIDS.includes(vid(p))) ?? ports[0];
+    lastPort = pick ? `${pick.portName ?? pick.displayName ?? "port"}${pick.displayName ? ` (${pick.displayName})` : ""}` : "";
+    callback(pick?.portId ?? "");
+  });
+  // Electron grants permission checks by default; these keep that true
+  // for serial once a handler exists.
+  session.defaultSession.setPermissionCheckHandler(() => true);
+  session.defaultSession.setDevicePermissionHandler((d) => d.deviceType === "serial");
+}
+ipcMain.handle("serial:last", () => lastPort);
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1520,
@@ -82,5 +122,5 @@ function createWindow() {
   else win.loadFile(join(here, "..", "dist", "index.html"));
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => { enableSerial(); createWindow(); });
 app.on("window-all-closed", () => app.quit());

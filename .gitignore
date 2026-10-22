@@ -4,6 +4,8 @@
 .vscode/launch.json
 .vscode/ipch
 include/secrets.h
+# Built panel images: secrets.h is compiled into them (tools/flash_image.py)
+firmware/
 mqtt_simulated_devices/.env
 mqtt_simulated_devices/.venv
 __pycache__/
