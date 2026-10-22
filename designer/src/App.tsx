@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { bridge } from "./bridge";
-import { FlashCard } from "./flash/FlashCard";
 import { HaClient } from "./ha/haClient";
 import {
   buildHeader, buildInventory, buildLayout, dumpLayout, Inventory, Layout, LAYOUT_EVENT, LAYOUT_MAX_JSON,
@@ -250,14 +249,10 @@ export default function App() {
   }, [layout, live, client]);
 
   // ------------------------------------------------------------- actions
-  async function sendLayout() {
-    if (!client || !layout) throw new Error("not connected to Home Assistant");
-    await client.cmd("fire_event", { event_type: LAYOUT_EVENT, event_data: { layout } });
-  }
   async function push() {
     if (!client || !layout) return;
     try {
-      await sendLayout();
+      await client.cmd("fire_event", { event_type: LAYOUT_EVENT, event_data: { layout } });
       flash({ kind: "ok", text: `Pushed ${bytes} bytes. The panel restarts into it; its serial log confirms.` });
     } catch (e) { flash({ kind: "error", text: (e as Error).message }); }
   }
@@ -667,8 +662,6 @@ export default function App() {
               <button className="primary" onClick={push} disabled={!client || !layout || verdict?.ok === false}>Push to panel</button>
             </div>
           </div>
-
-          <FlashCard canPush={!!client && !!layout && verdict?.ok !== false} pushLayout={sendLayout} />
         </section>
       </main>
       {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}

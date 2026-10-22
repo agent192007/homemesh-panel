@@ -7,16 +7,6 @@ export interface Bridge {
   chooseProject(): Promise<string | null>;
   loadLayout(): Promise<string | null>;
   saveLayout(json: string, header: string): Promise<string>;
-  firmwareInfo(): Promise<FirmwareInfo>;
-  loadFirmware(): Promise<Uint8Array>;
-  lastSerialPort(): Promise<string>;
-}
-
-// tools/flash_image.py's description of firmware/homemesh_panel.bin.
-export interface FirmwareInfo {
-  error?: string;
-  path?: string; bytes?: number; built?: string; commit?: string;
-  sha256?: string; md5?: string; wifi?: string; ha_host?: string; offset?: number;
 }
 
 declare global {
@@ -29,7 +19,4 @@ export const bridge: Bridge = window.homemesh ?? {
   chooseProject: async () => null,
   loadLayout: async () => null,
   saveLayout: async () => { throw new Error("saving needs the desktop app"); },
-  firmwareInfo: async () => ({ error: "Flashing needs the desktop app." }),
-  loadFirmware: async () => { throw new Error("flashing needs the desktop app"); },
-  lastSerialPort: async () => "",
 };

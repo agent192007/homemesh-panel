@@ -212,12 +212,3 @@ button.small { padding: 2px 8px; font-size: 12px; }
 .auto-colour input[type=color] { width: 30px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: none; }
 .auto-colour input[type=color]:not(.set) { opacity: 0.5; }
 .auto-colour .soft { width: 34px; }
-
-/* ---- panel firmware ---- */
-.fw-facts { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
-.fw-facts b { color: var(--text); font-weight: 600; }
-.fw-opt { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 8px; }
-.fw-progress { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 8px; }
-.fw-log { max-height: 180px; overflow: auto; margin: 6px 0 0; padding: 8px; font-size: 11px; line-height: 1.35;
-  background: var(--bg); border: 1px solid var(--line); border-radius: 6px; white-space: pre-wrap; word-break: break-all; }
-.fw-warn { margin-right: auto; align-self: center; }

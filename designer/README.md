@@ -52,14 +52,6 @@ time, or via **Choose project folder…** in the Layout card.
   and can be reverted.
 - The app itself follows Windows' light/dark setting, or Auto/Dark/Light
   in the top right.
-- **Panel firmware**: set up a new display or update one. Plug it in by
-  USB, press **Flash a panel…**: the designer writes the firmware (no
-  Python, PlatformIO or esptool needed - it uses Web Serial and
-  esptool-js), shows the panel's boot log, and sends it this layout once
-  it is listening. The image is `firmware/homemesh_panel.bin` in the
-  project, written by every `pio run -e ha`; it is not inside the exe,
-  because it carries the Wi-Fi password and Home Assistant token.
-  Flashing writes the whole board, so it erases a stored layout.
 
 ## Developing
 
