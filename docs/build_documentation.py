@@ -1360,14 +1360,14 @@ table(["Do not say", "Say instead"], [
     ["That tiles can be resized or placed freely", "Tiles are placed by order in a fixed two-column grid."],
 ], [6.0, 10.0], size=9)
 h2("Check before the review: firmware on the board")
-callout("The board is running the 20 October firmware — flash the 21 October one", [
-    "Flashed on 20 October with the fixes for long names and the light (Daylight) theme; the boot log matched "
-    "the healthy one. Check the names and the Daylight theme on the real screen once before the review.",
-    "<b>The 21 October firmware adds fan speed and automation colours and is not flashed yet</b> (the board was "
-    "unplugged). Flash it (<c>pio run -e ha -t upload</c>, or <c>../homemesh_ha_firmware_21oct.bin</c>), check "
-    "the boot log, then push the layout again. <b>Until then, do not push a layout with a speed-controlled fan "
-    "on it</b>: the old firmware would send the fan a light's brightness command, which Home Assistant "
-    "rejects.",
+callout("The board is running the 21 October firmware", [
+    "Flashed on 22 October, with fan speed, automation colours and the fixes for long names and the light "
+    "(Daylight) theme. Check the names and the Daylight theme on the real screen once before the review, and "
+    "push your layout again: the flash erased the one stored on the panel.",
+    "<b>The Wi-Fi link from the laptop to the panel is currently poor</b> (half the pings lost on 22 October; "
+    "0% on 18 October). After a push or a restart the panel can take minutes to reconnect. Test the demo in the "
+    "room it will run in, with the panel's log open, and if it is slow try the phone hotspot route in "
+    "\"Before the presentation\".",
     "The new designer's Push sends the same event as the old tool (tested byte for byte), but nobody has yet "
     "watched a push from <i>the new designer</i> arrive on the board. Do it once with the serial monitor open "
     "and look for <c>[layout] push received</c> then <c>[layout] loaded from NVS</c>.",

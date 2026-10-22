@@ -93,10 +93,12 @@ save, reload with nothing dirty, remove a page) and on the simulator's
 render. The paper and the tkinter tool still describe pages as rooms.
 
 **21 Oct: fan speed, automation colours, demo automations.** At the
-user's request. **Firmware changed again and is NOT on the board** (no
-serial port; the board was unplugged). Built for all envs (env:ha static
-RAM 123,200 B, +176), saved as `../homemesh_ha_firmware_21oct.bin`
-(app only, SHA-256 `974b4a0d...`), verified in the simulator.
+user's request. **On the board since 22 Oct** (whole-board flash, md5
+verified; that also erased the stored layout, so the panel runs the
+compiled `ha_layout.h` until pushed). Booted clean: 15,408 B pool free,
+8,188 B stack free, no filter overflow. Built for all envs (env:ha static
+RAM 123,200 B, +176), saved as `../homemesh_ha_firmware_21oct.bin` (app
+only, SHA-256 `974b4a0d...`).
 - **Fans with `supported_features & 1` (SET_SPEED) are `Dimmable`**, in
   both `classify()`s. The firmware reads HA's `percentage` (0-100, null
   when off; null/0 keeps the last level like a light) and sends
@@ -118,6 +120,25 @@ RAM 123,200 B, +176), saved as `../homemesh_ha_firmware_21oct.bin`
 - The test fixture gained fans' `supported_features` and the six
   actions (friendly names only). `tests/slider_probe.mjs` presses the
   detail slider in the simulator and prints the command sent.
+
+**Flashing from the designer was built on 22 Oct and then reverted at
+the user's request** (commit `f02f41d`, reverted by the next one): Web
+Serial + esptool-js, a whole-board image written by a post-build script.
+It worked on the board. To bring it back, revert the revert.
+
+**Open on 22 Oct: the hotspot link to the panel is lossy.** The user
+reported the panel "does not connect back" after a push. Measured: the
+laptop's link to its router is clean (0% loss, 7 ms) but pings to the
+panel lose 50-75% at -27 to -46 dBm, replies 25-180 ms; on 18 Oct it was
+0% loss, 40 ms, same setup. On this link the WebSocket handshake takes
+minutes, so after any restart the panel looks dead for a long time; it
+does recover by itself (about 3 min after the 22 Oct flash). After the
+flash's hard reset the hotspot also dropped it once with `reason 6
+(NOT_AUTHED)` - its old association was never ended. Band Selection is
+still 2.4G Only. Channel unknown (netsh needs Location services). Not
+fixed. Candidate firmware changes, not made: `WiFi.disconnect()` before
+`ESP.restart()` on a push, and logging every reconnect (only the first
+`[wifi] connected` is printed, so a reconnected panel is silent).
 
 Toolchain facts found on 20 Oct, all on this laptop:
 - **Emscripten SDK at `D:\Projects\emsdk`** (outside the repo). This
