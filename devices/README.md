@@ -46,7 +46,7 @@ and paste its API key.
 - **The ESP32 access point takes 4 devices** (`MAX_CLIENTS` in
   `src/access_point.cpp`): the panel, the laptop and these two. A third
   board needs that raised and the access point reflashed.
-- The smart lamp has a key in `secrets.yaml` but no config here yet.
+- `smart_lamp_api_key` in `secrets.yaml` is unused: there is no smart lamp.
 - `air-monitor.yaml` once drove an SG90 servo (owl wings); the board has
   none, so it was removed on 22 Oct and "Drop Threshold" became "Bad Air
   Threshold". If the device was already in Home Assistant, that entity

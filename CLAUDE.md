@@ -179,11 +179,13 @@ layout; even the 9-device one crashed in a full screen walk. Now
 static RAM fell 123,304 -> 82,248 B, so the heap pays only ~24 KB net.
 Worst case free in `tests/stress_sim.mjs`: 25.1 KB (user's layout),
 20.3 KB (+fan), 2.1 KB for the largest layout the format allows (12
-devices all favourites, 6 pages, 8 automations). **Built, saved as
-`../homemesh_ha_firmware_22oct.bin` (SHA-256 `e0d0ece1...`), NOT yet
-flashed** (board unplugged): check `[mem] UI built` and the heap's
-`low` in the boot log after flashing - Wi-Fi and the WebSocket now share
-~140 KB instead of ~160 KB.
+devices all favourites, 6 pages, 8 automations). **Flashed 22 Oct**
+(also saved as `../homemesh_ha_firmware_22oct.bin`, SHA-256
+`e0d0ece1...`): `[mem] UI built: ... 31064 free, largest block 30380 |
+heap 139004 free, low 138756` with the user's 9-device layout - the pool
+figure matches the simulator to the byte. Not yet seen with Wi-Fi and
+Home Assistant connected (the access point was unpowered): watch the
+heap's `low` once it is.
 - The designer no longer goes blank when a layout is too big: the
   simulator boots a new layout and draws a few frames before swapping it
   in, a crash there or later is caught, and the verdict says the panel
