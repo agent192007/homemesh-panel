@@ -47,8 +47,9 @@ time, or via **Choose project folder…** in the Layout card.
 - **Live states**: real device states from Home Assistant, and taps
   really switch the devices — the same service calls the firmware makes.
 - **Save to project** writes `include/ha_layout.json` and `ha_layout.h`
-  (the compiled fallback). **Push to panel** sends the layout through
-  Home Assistant; the panel restarts into it. Unsaved changes are flagged
+  (the compiled fallback). **Push to panel** saves those files too and
+  sends the layout through Home Assistant; the panel restarts into it.
+  So the designer always opens on the layout the panel has. Unsaved changes are flagged
   and can be reverted.
 - The app itself follows Windows' light/dark setting, or Auto/Dark/Light
   in the top right.

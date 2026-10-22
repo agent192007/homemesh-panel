@@ -9,6 +9,7 @@ export const Ev = {
   Temperature: 5,
   Humidity: 6,
   AutomationRan: 7,
+  Availability: 8,   // value 1 / 0: HA reports the device unavailable
 } as const;
 
 export const Link = { NoWifi: 0, NoBroker: 1, Online: 2 } as const;

@@ -62,5 +62,9 @@
   "unknown": {
     "mdi": "help-circle",
     "cp": "F02D7"
+  },
+  "offline": {
+    "mdi": "lan-disconnect",
+    "cp": "F0319"
   }
 }

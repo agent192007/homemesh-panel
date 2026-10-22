@@ -24,6 +24,9 @@ WANT = [
     ("blinds",    "blinds",            "cover / blind"),
     ("home",      "home",              "home page"),
     ("unknown",   "help-circle",       "fallback"),
+    # Drawn by the panel itself on a device Home Assistant reports
+    # unavailable; not offered as a choice in the designer.
+    ("offline",   "lan-disconnect",    "device unavailable"),
 ]
 
 missing = [m for _, m, _ in WANT if m not in cp]

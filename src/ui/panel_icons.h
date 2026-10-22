@@ -37,8 +37,9 @@ LV_FONT_DECLARE(panel_icons_18);
 #define ICON_BLINDS    "\xF3\xB0\x82\xAC"   // mdi:blinds  U+F00AC
 #define ICON_HOME      "\xF3\xB0\x8B\x9C"   // mdi:home  U+F02DC
 #define ICON_UNKNOWN   "\xF3\xB0\x8B\x97"   // mdi:help-circle  U+F02D7
+#define ICON_OFFLINE   "\xF3\xB0\x8C\x99"   // mdi:lan-disconnect  U+F0319
 
-#define ICON_COUNT 16
+#define ICON_COUNT 17
 
 // Icon name from the layout -> glyph. Unknown names fall back to
 // ICON_UNKNOWN rather than drawing nothing, so a typo in a pushed

@@ -81,6 +81,9 @@ static bool power[MAX_ENTITIES];
 static uint8_t bright[MAX_ENTITIES];
 static int32_t color[MAX_ENTITIES];
 static bool known[MAX_ENTITIES];
+// False while Home Assistant reports the device unavailable. Starts
+// true: a device is assumed reachable until HA says otherwise.
+static bool avail[MAX_ENTITIES];
 
 static float area_temp[MAX_AREAS], area_hum[MAX_AREAS];
 static bool area_temp_ok[MAX_AREAS], area_hum_ok[MAX_AREAS];
@@ -239,7 +242,8 @@ static void dp_toggle_cb(lv_event_t *e) {
 }
 
 static void chevron_cb(lv_event_t *e) {
-  open_detail((uint8_t)(uintptr_t)lv_event_get_user_data(e));
+  uint8_t i = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
+  if (avail[i]) open_detail(i);   // nothing to control while it is unreachable
 }
 
 static void dp_slider_cb(lv_event_t *e) {
@@ -313,7 +317,8 @@ static void gesture_cb(lv_event_t *e) {
 // ------------------------------------------------------------
 static void refresh_entity(uint8_t i) {
   const EntityDesc *d = transport_entity(i);
-  bool on = known[i] && power[i];
+  // Not lit while unavailable: HA's last word on power is stale.
+  bool on = avail[i] && known[i] && power[i];
 
   // A dimmable that is on reads its level, "72%", instead of "ON".
   // The amber reading and the lit icon already say it is on, and the
@@ -324,7 +329,8 @@ static void refresh_entity(uint8_t i) {
   // Guarded on bright[i] because a light can report on before its
   // brightness attribute arrives, and "0%" would be a lie.
   char state[16];
-  if (!known[i]) snprintf(state, sizeof(state), "--");
+  if (!avail[i]) snprintf(state, sizeof(state), "Offline");
+  else if (!known[i]) snprintf(state, sizeof(state), "--");
   else if (!power[i]) snprintf(state, sizeof(state), "OFF");
   else if (has_extras(d) && bright[i])
     snprintf(state, sizeof(state), "%d%%", pct_of(bright[i]));
@@ -350,6 +356,15 @@ static void refresh_entity(uint8_t i) {
       if (tiles[t].bar) lv_obj_clear_state(tiles[t].bar, LV_STATE_CHECKED);
     }
     if (tiles[t].bar) lv_bar_set_value(tiles[t].bar, bright[i], LV_ANIM_OFF);
+    // Unavailable: the disconnect glyph in place of the device's own,
+    // and no level bar beside "Offline". The fade and the dead taps
+    // come from refresh_header(), which owns LV_STATE_DISABLED.
+    if (tiles[t].icon)
+      lv_label_set_text(tiles[t].icon, icon_glyph(avail[i] ? d->icon : "offline"));
+    if (tiles[t].bar) {
+      if (avail[i]) lv_obj_clear_flag(tiles[t].bar, LV_OBJ_FLAG_HIDDEN);
+      else lv_obj_add_flag(tiles[t].bar, LV_OBJ_FLAG_HIDDEN);
+    }
   }
 
   if (dp_open && dp_entity == i) refresh_detail();
@@ -363,11 +378,16 @@ static void refresh_header() {
   lv_label_set_text(title_label, t);
 
   bool en = controls_enabled();
-  for (uint8_t i = 0; i < tile_n; i++) set_enabled(tiles[i].tile, en);
+  // An unavailable device's tile is disabled too. Its chevron is not -
+  // chevron_cb() ignores it instead: switching every chevron's state
+  // starts a theme transition on each, and those come out of the 40 KB
+  // pool all at once (7.3 KB worst case free fell to 3.9 KB).
+  for (uint8_t i = 0; i < tile_n; i++) set_enabled(tiles[i].tile, en && avail[tiles[i].entity]);
   for (uint8_t i = 0; i < auto_n; i++) set_enabled(auto_btn[i], en);
-  set_enabled(dp_btn, en);
-  set_enabled(dp_slider, en);
-  set_enabled(dp_wheel, en);
+  bool dp_en = en && (!dp_open || avail[dp_entity]);
+  set_enabled(dp_btn, dp_en);
+  set_enabled(dp_slider, dp_en);
+  set_enabled(dp_wheel, dp_en);
 
   lv_color_t col;
   switch (link) {
@@ -734,6 +754,7 @@ static lv_obj_t *make_screen(lv_obj_t **tv_out) {
 void dashboard_create() {
   ent_n = transport_entity_count();
   if (ent_n > MAX_ENTITIES) ent_n = MAX_ENTITIES;
+  for (uint8_t i = 0; i < ent_n; i++) avail[i] = true;
   auto_n = transport_automation_count();
   if (auto_n > MAX_AUTOMATIONS) auto_n = MAX_AUTOMATIONS;
   area_n = transport_area_count();
@@ -812,6 +833,13 @@ void dashboard_apply(const PanelEvent &e) {
       if (e.entity < area_n) {
         area_hum[e.entity] = e.fvalue;
         area_hum_ok[e.entity] = true;
+      }
+      break;
+
+    case EventType::Availability:
+      if (e.entity < ent_n) {
+        avail[e.entity] = e.value != 0;
+        refresh_entity(e.entity);
       }
       break;
 

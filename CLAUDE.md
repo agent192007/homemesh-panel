@@ -138,6 +138,38 @@ which has the panel's 40 KB pool, and reports the least free) gave 5,020
 B with six, 7,316 B with four, 11,760 B with none. Run it after adding
 anything to the layout. Preflight passed in full. No theme on the panel.
 
+**22 Oct, later: unavailable devices, push saves, the ESP32 access point.**
+- **A device HA reports `unavailable` is drawn offline** (user's
+  request): faded tile, the `offline` glyph (MDI lan-disconnect, added
+  to the icon font, not offered in the designer's picker), "Offline"
+  for its reading, no level bar, not lit, and taps ignored.
+  `EventType::Availability` is the **last** enum value so the earlier
+  numbers (shared with the simulator's `Ev`) hold. `unknown` still
+  reads as off. Only the tile is set DISABLED; the chevron checks
+  `avail[]` in `chevron_cb()` instead, because changing every
+  chevron's state starts a theme transition on each, out of the pool
+  at once: worst case free fell from 7,316 to 3,872 B before that fix.
+  Designer Live mode passes it through. Flashed to the panel 22 Oct
+  (app only). `tests/render_sim.mjs ... offline` renders it;
+  `OFFLINE=1 node tests/stress_sim.mjs` walks it (6,980 B worst, 0
+  commands sent for the offline device).
+- **Push now also saves to the project** (designer), so the designer
+  opens on what the panel has and a reflash falls back to it. The user
+  reported the designer "not having the last uploaded layout": pushes
+  had never been saved.
+- **The demo network is now the ESP32 access point** (`env:ap`, flashed
+  22 Oct to a spare CP2102 board on COM3, which needed the CP210x driver
+  and BOOT held to flash - no auto-reset into download mode). It picked
+  channel 11. The laptop joins `Pranesh_laptop` with 192.168.137.1 set
+  by hand and gets internet over phone USB tethering. **Opening COM3
+  the normal way resets the AP** (its RTS reaches EN) and drops the
+  network; read it with DTR and RTS held low before `open()`. Windows
+  will not rejoin a network from a script without Location services.
+  `tools/preflight.ps1` now accepts either network.
+- **The layout the user pushed on 22 Oct (9 devices, 4 pages) leaves
+  6,488 B free at boot, largest block 5,804** - about half the 5-device
+  layout's. Run `tests/stress_sim.mjs` on it once it is saved.
+
 **Open on 22 Oct: the hotspot link to the panel is lossy.** The user
 reported the panel "does not connect back" after a push. Measured: the
 laptop's link to its router is clean (0% loss, 7 ms) but pings to the

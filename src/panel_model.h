@@ -42,6 +42,11 @@ enum class EventType : uint8_t {
   Temperature,       // entity = AREA index, fvalue
   Humidity,          // entity = AREA index, fvalue
   AutomationRan,     // entity = automation index (feedback flash)
+  // Last, so the values above keep their numbers (the designer's
+  // simulator shares them). value = 1 available, 0 unavailable: Home
+  // Assistant cannot reach the device, so it is drawn greyed out with
+  // a disconnect glyph and takes no taps.
+  Availability,      // entity, value = 1 / 0
 };
 
 struct PanelEvent {

@@ -53,13 +53,15 @@ if (-not $band) {
       "In an ADMIN PowerShell: Set-NetAdapterAdvancedProperty -Name '$($band.Name)' -DisplayName 'Band Selection' -DisplayValue '2. 2.4G Only'   then turn Mobile Hotspot off and on."
 }
 
-# 1. Hotspot. ICS always takes 192.168.137.1, so its presence is a
-#    reliable proxy for "the hotspot is actually running".
+# 1. The demo network. Either Windows Mobile Hotspot (ICS always takes
+#    192.168.137.1) or the ESP32 access point (env:ap), which the laptop
+#    joins with 192.168.137.1 set by hand. Either way the address being
+#    on an adapter means the laptop is on the panel's network.
 $hasIp = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
          Where-Object { $_.IPAddress -eq $HaHost }
-if ($hasIp) { Ok "hotspot up ($HaHost on $($hasIp[0].InterfaceAlias))" }
-else { Bad "hotspot is not running - no $HaHost on any adapter" `
-           "Settings > Network & internet > Mobile hotspot. Band 2.4 GHz, power saving off. It will not start without a network to share - if the venue WiFi is unusable, join the laptop to the phone's hotspot first." }
+if ($hasIp) { Ok "demo network up ($HaHost on $($hasIp[0].InterfaceAlias))" }
+else { Bad "laptop is not on the demo network - no $HaHost on any adapter" `
+           "ESP32 access point: join the WiFi 'Pranesh_laptop' (its IP is set to $HaHost by hand). Windows hotspot instead: Settings > Network & internet > Mobile hotspot, 2.4 GHz - never both at once." }
 
 # 2. Firewall. Without a path through it the panel joins WiFi fine and
 #    then times out on the WebSocket, which reads as a code bug.

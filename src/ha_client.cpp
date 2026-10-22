@@ -104,7 +104,14 @@ static void apply_entity_state(uint8_t i, const char *state, JsonVariantConst at
   //
   // "unavailable" and "unknown" mean the integration cannot reach the
   // device. Both fall through to off rather than being guessed at.
-  if (state) post(EventType::Power, i, strcmp(state, "on") == 0);
+  //
+  // "unavailable" also tells the UI, which greys the tile out with a
+  // disconnect glyph instead of showing a plausible-looking OFF.
+  if (state) {
+    bool available = strcmp(state, "unavailable") != 0;
+    post(EventType::Availability, i, available);
+    if (available) post(EventType::Power, i, strcmp(state, "on") == 0);
+  }
 
   if (g_layout.ents[i].kind == EntityKind::Toggle) return;
   if (attrs.isNull()) return;

@@ -23,6 +23,7 @@ static const IconEntry ICONS[] = {
   { "blinds", ICON_BLINDS },
   { "home", ICON_HOME },
   { "unknown", ICON_UNKNOWN },
+  { "offline", ICON_OFFLINE },
 };
 
 const char *icon_glyph(const char *name) {

@@ -249,11 +249,23 @@ export default function App() {
   }, [layout, live, client]);
 
   // ------------------------------------------------------------- actions
+  // Push also saves: the project files are what the designer opens with
+  // next time, and what a reflash falls back to, so they should always
+  // hold the layout that is on the panel. Save on its own stays, for
+  // keeping work without sending it.
   async function push() {
     if (!client || !layout) return;
     try {
+      let saved = "";
+      if (tables && project) {
+        await bridge.saveLayout(json, buildHeader(tables));
+        setBaseline(json);
+        setSaved(layout);
+        savedRef.current = layout;
+        saved = " Saved to the project too.";
+      }
       await client.cmd("fire_event", { event_type: LAYOUT_EVENT, event_data: { layout } });
-      flash({ kind: "ok", text: `Pushed ${bytes} bytes. The panel restarts into it; its serial log confirms.` });
+      flash({ kind: "ok", text: `Pushed ${bytes} bytes; the panel restarts into it.${saved}` });
     } catch (e) { flash({ kind: "error", text: (e as Error).message }); }
   }
   async function save() {
@@ -674,7 +686,13 @@ export default function App() {
 function stateEvents(i: number, st?: LiveState): SimEvent[] {
   if (!st) return [];
   const ev: SimEvent[] = [];
-  if (st.s !== undefined) ev.push({ type: Ev.Power, entity: i, value: st.s === "on" ? 1 : 0 });
+  // As apply_entity_state() does: "unavailable" greys the tile out
+  // instead of reading as off.
+  if (st.s !== undefined) {
+    const available = st.s !== "unavailable";
+    ev.push({ type: Ev.Availability, entity: i, value: available ? 1 : 0 });
+    if (available) ev.push({ type: Ev.Power, entity: i, value: st.s === "on" ? 1 : 0 });
+  }
   if (st.brightness != null) ev.push({ type: Ev.Brightness, entity: i, value: Math.max(0, Math.min(255, st.brightness)) });
   if (Array.isArray(st.rgb) && st.rgb.length >= 3) ev.push({ type: Ev.Color, entity: i, value: (st.rgb[0] << 16) | (st.rgb[1] << 8) | st.rgb[2] });
   return ev;

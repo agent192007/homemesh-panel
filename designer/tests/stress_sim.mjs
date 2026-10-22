@@ -19,6 +19,10 @@ const swipe = async (x0, y0, x1, y1) => { sim._sim_pointer(x0, y0, 1); await run
   sim._sim_pointer(x1, y1, 0); await run(400); };
 sim._sim_event(0, 0, 2, 0); sim._sim_event(1, 0, 1, 0);
 L.entities.forEach((_, i) => { sim._sim_event(2, i, 1, 0); sim._sim_event(3, i, 180, 0); });
+// OFFLINE=1: the first device unavailable, as Home Assistant reports it.
+if (process.env.OFFLINE) sim._sim_event(8, 0, 0, 0);
+const cmds = [];
+sim.onCommand = (k, i, v) => cmds.push([k, i, v]);
 await run(400);
 for (let round = 0; round < 2; round++) {
   for (let pg = 0; pg <= L.areas.length; pg++) { await tap(136, 52); await tap(296, 24); await swipe(280, 150, 40, 150); }
@@ -27,5 +31,6 @@ for (let round = 0; round < 2; round++) {
   sim._sim_event(0, 0, 1, 0); await run(600); sim._sim_event(0, 0, 2, 0); await run(600);    // link down, faded tiles, back
 }
 console.log(`least free in the LVGL pool: ${min} bytes`);
+console.log(`commands for device 0: ${cmds.filter((c) => c[1] === 0 && c[0] !== 7).length}`);
 const bad = out.filter((l) => /ASSERT|abort|out of memory/i.test(l));
 console.log(bad.length ? bad.join("\n") : "no asserts");
