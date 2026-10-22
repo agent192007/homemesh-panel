@@ -63,6 +63,11 @@ function normalise(s: Sel, inv: Inventory, saved: Layout | null): Sel {
     names: Object.fromEntries(Object.entries(s.names).filter(([id, n]) => n !== friendly.get(id))),
   };
 }
+// Graphics memory free after the first draw, below which a layout is
+// flagged. Walking every screen (tests/stress_sim.mjs) uses 6-9 KB more
+// than the first draw, so this keeps the worst case above ~5 KB.
+const TIGHT_POOL = 14 * 1024;
+
 interface LiveState { s?: string; brightness?: number | null; rgb?: number[] | null }
 
 const THEME_LABELS: Record<string, string> = {
@@ -94,7 +99,7 @@ export default function App() {
   const [live, setLive] = useState(false);
   const [search, setSearch] = useState("");
   const [logs, setLogs] = useState<string[]>([]);
-  const [verdict, setVerdict] = useState<{ ok: boolean; reason: string } | null>(null);
+  const [verdict, setVerdict] = useState<{ ok: boolean; reason: string; free?: number } | null>(null);
   const [toast, setToast] = useState<Status | null>(null);
   const sim = useRef<PanelSimulatorHandle>(null);
   const liveStates = useRef<Map<string, LiveState>>(new Map());
@@ -534,7 +539,7 @@ export default function App() {
           </div>
           {simJson
             ? <PanelSimulator ref={sim} layoutJson={simJson} bootEvents={bootEvents} onCommand={onCommand}
-                onLog={log} onLayoutResult={(ok, reason) => setVerdict({ ok, reason })} />
+                onLog={log} onLayoutResult={(ok, reason, free) => setVerdict({ ok, reason, free })} />
             : <div className="sim-empty">No layout yet</div>}
           <p className="sim-help">{live
             ? "Live: states come from Home Assistant, and taps really switch the devices."
@@ -653,8 +658,11 @@ export default function App() {
               <span>{layout?.areas.length ?? 0} / {MAX_AREAS} pages</span>
             </div>
             {verdict && (verdict.ok
-              ? <div className="verdict ok">✓ Accepted by the firmware's validator</div>
-              : <div className="verdict bad">✗ The panel would reject this: {verdict.reason}</div>)}
+              ? <div className={`verdict ${verdict.free !== undefined && verdict.free < TIGHT_POOL ? "bad" : "ok"}`}>
+                  ✓ Accepted by the firmware's validator
+                  {verdict.free !== undefined && <> · {(verdict.free / 1024).toFixed(1)} KB graphics memory free{verdict.free < TIGHT_POOL ? " — tight: opening pages and panels can use up to 9 KB more" : ""}</>}
+                </div>
+              : <div className="verdict bad">✗ {verdict.reason.startsWith("the panel runs out") ? "Not safe to push: " : "The panel would reject this: "}{verdict.reason}</div>)}
             {tables?.notes.map((n) => <div key={n} className="note">{n}</div>)}
             <div className="project">
               {project

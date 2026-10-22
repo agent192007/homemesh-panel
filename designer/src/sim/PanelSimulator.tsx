@@ -29,7 +29,18 @@ interface Props {
   bootEvents: () => SimEvent[];
   onCommand: (kind: number, index: number, value: number) => void;
   onLog: (line: string) => void;
-  onLayoutResult: (ok: boolean, reason: string) => void;
+  // ok, or the reason it would not run: the firmware's validator, or
+  // the panel's 64 KB graphics pool running out (LVGL asserts, and the
+  // board restarts). freeBytes: pool left after the first full draw.
+  onLayoutResult: (ok: boolean, reason: string, freeBytes?: number) => void;
+}
+
+// What the panel does when LVGL runs out of its pool: the assert in
+// lv_assert_hit() names the file and line, and the board restarts. The
+// simulator exits instead; either way the layout cannot be used.
+function outOfMemory(lastAssert: string): string {
+  return "the panel runs out of graphics memory with this layout and would keep restarting"
+    + (lastAssert ? ` (${lastAssert})` : "") + ". Remove a device, a favourite or an automation.";
 }
 
 export const PanelSimulator = forwardRef<PanelSimulatorHandle, Props>(function PanelSimulator(
@@ -38,10 +49,21 @@ export const PanelSimulator = forwardRef<PanelSimulatorHandle, Props>(function P
   const sim = useRef<PanelSimModule | null>(null);
   const cb = useRef({ onCommand, onLog, onLayoutResult, bootEvents });
   cb.current = { onCommand, onLog, onLayoutResult, bootEvents };
+  const lastAssert = useRef("");
+  const [crashed, setCrashed] = useState("");
+  // A running instance that hit an assert is dead: stop driving it.
+  const crash = (e: unknown) => {
+    if (!sim.current) return;
+    sim.current = null;
+    const why = outOfMemory(lastAssert.current);
+    setCrashed(why);
+    cb.current.onLog(`[designer] simulator stopped: ${(e as Error)?.message ?? e}`);
+    cb.current.onLayoutResult(false, why);
+  };
   const [booting, setBooting] = useState(true);
 
   useImperativeHandle(ref, () => ({
-    post(e) { sim.current?._sim_event(e.type, e.entity, e.value, e.fvalue ?? 0); },
+    post(e) { try { sim.current?._sim_event(e.type, e.entity, e.value, e.fvalue ?? 0); } catch (x) { crash(x); } },
     fitLabel(text, width) {
       const m = sim.current;
       if (!m) return null;
@@ -69,7 +91,7 @@ export const PanelSimulator = forwardRef<PanelSimulatorHandle, Props>(function P
     let cancelled = false;
     (async () => {
       const m = await createPanelSim({
-        print: (s) => cb.current.onLog(s),
+        print: (s) => { if (s.includes("ASSERT FAILED")) lastAssert.current = s.replace(/^.*ASSERT FAILED at .*[\\/]/, ""); cb.current.onLog(s); },
         printErr: (s) => cb.current.onLog(s),
         onCommand: (k, i, v) => cb.current.onCommand(k, i, v),
       });
@@ -82,11 +104,23 @@ export const PanelSimulator = forwardRef<PanelSimulatorHandle, Props>(function P
       const reason = ok ? "" : m.UTF8ToString(err);
       m._free(json);
       m._free(err);
-      cb.current.onLayoutResult(ok, reason);
-      if (!ok) { setBooting(false); return; }   // keep the old instance running
-      m._sim_boot();
-      for (const e of cb.current.bootEvents()) m._sim_event(e.type, e.entity, e.value, e.fvalue ?? 0);
+      if (!ok) { cb.current.onLayoutResult(false, reason); setBooting(false); return; }   // keep the old instance running
+      // Boot it and draw a few frames before swapping it in: a layout too
+      // big for the pool asserts here, and must not replace a working one.
+      lastAssert.current = "";
+      try {
+        m._sim_boot();
+        for (const e of cb.current.bootEvents()) m._sim_event(e.type, e.entity, e.value, e.fvalue ?? 0);
+        for (let i = 0; i < 4; i++) { m._sim_step(); await new Promise((r) => setTimeout(r, 35)); }
+      } catch {
+        if (!cancelled) cb.current.onLayoutResult(false, outOfMemory(lastAssert.current));
+        setBooting(false);
+        return;
+      }
+      if (cancelled) return;
+      cb.current.onLayoutResult(true, "", m._sim_pool_free());
       sim.current = m;
+      setCrashed("");
       setBooting(false);
     })();
     return () => { cancelled = true; };
@@ -99,7 +133,9 @@ export const PanelSimulator = forwardRef<PanelSimulatorHandle, Props>(function P
     let raf = 0;
     const frame = () => {
       const m = sim.current;
-      if (m && m._sim_step()) {
+      let flushed = false;
+      try { flushed = !!m && !!m._sim_step(); } catch (x) { crash(x); }
+      if (m && flushed) {
         const fb = new Uint16Array(m.HEAPU16.buffer, m._sim_framebuffer(), W * H);
         const d = img.data;
         for (let i = 0, j = 0; i < fb.length; i++, j += 4) {
@@ -123,7 +159,7 @@ export const PanelSimulator = forwardRef<PanelSimulatorHandle, Props>(function P
     const r = canvas.current!.getBoundingClientRect();
     const x = Math.max(0, Math.min(W - 1, Math.round((e.clientX - r.left) / r.width * W)));
     const y = Math.max(0, Math.min(H - 1, Math.round((e.clientY - r.top) / r.height * H)));
-    sim.current?._sim_pointer(x, y, down ? 1 : 0);
+    try { sim.current?._sim_pointer(x, y, down ? 1 : 0); } catch (x) { crash(x); }
   };
 
   return (
@@ -138,6 +174,7 @@ export const PanelSimulator = forwardRef<PanelSimulatorHandle, Props>(function P
         onPointerUp={(e) => point(e, false)}
       />
       {booting && <div className="sim-boot">starting panel…</div>}
+      {crashed && !booting && <div className="sim-boot sim-crash">Out of graphics memory — the real panel would restart here.</div>}
     </div>
   );
 });

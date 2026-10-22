@@ -1,0 +1,152 @@
+# Air monitor - ESP32 + MQ-135 + DHT11
+# MQ-135 is NOT a calibrated gas sensor: readings are relative air quality only.
+
+# ---------- Tune this ----------
+substitutions:
+  mq_divider_ratio: "1.5"    # 1.5 for 10k+20k (or 3 equal); 1.667 for 22k+33k
+
+esphome:
+  name: air-monitor
+  friendly_name: Air Monitor
+  on_boot:
+    priority: -100
+    then:
+      - logger.log: "MQ-135 warming up for 5 minutes..."
+      - delay: 5min
+      - globals.set:
+          id: warmed_up
+          value: "true"
+      - logger.log: "Warm-up done, bad-air detection active"
+
+esp32:
+  board: esp32dev
+
+logger:
+
+api:
+  encryption:
+    key: !secret air_monitor_api_key
+
+ota:
+  - platform: esphome
+    encryption:
+      key: !secret air_monitor_api_key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  manual_ip:
+    static_ip: 192.168.137.201
+    gateway: 192.168.137.1
+    subnet: 255.255.255.0
+
+globals:
+  - id: baseline          # MQ-135 clean-air voltage, survives reboots
+    type: float
+    restore_value: yes
+    initial_value: "0.0"
+  - id: bad_air
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: warmed_up
+    type: bool
+    restore_value: no
+    initial_value: "false"
+
+# ---------- Sensors ----------
+sensor:
+  - platform: dht
+    model: DHT11
+    pin: GPIO4
+    # Bare 4-pin sensor with no resistor? Replace the line above with:
+    # pin:
+    #   number: GPIO4
+    #   mode:
+    #     input: true
+    #     pullup: true
+    temperature:
+      name: "Temperature"
+    humidity:
+      name: "Humidity"
+    update_interval: 15s
+
+  - platform: adc
+    pin: GPIO34
+    id: mq_volts
+    name: "MQ-135 Voltage"
+    attenuation: 12db
+    update_interval: 2s
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+    filters:
+      - multiply: ${mq_divider_ratio}   # resistor divider ratio, set at top of file
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 5   # publish every 10 s
+
+  - platform: template
+    name: "Air Quality"   # 100 = clean-air baseline, higher = worse
+    id: air_quality
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    update_interval: 10s
+    lambda: |-
+      if (id(baseline) <= 0 || isnan(id(mq_volts).state)) return NAN;
+      return id(mq_volts).state / id(baseline) * 100.0;
+
+  # Battery % (uncomment once the 100k + 100k divider is on GPIO35)
+  # - platform: adc
+  #   pin: GPIO35
+  #   name: "Battery Voltage"
+  #   attenuation: 12db
+  #   update_interval: 60s
+  #   filters:
+  #     - multiply: 2.0
+
+binary_sensor:
+  - platform: template
+    name: "Bad Air"       # use this to trigger HA automations
+    lambda: return id(bad_air);
+
+# ---------- Controls in Home Assistant ----------
+button:
+  - platform: template
+    name: "Calibrate Clean Air"
+    entity_category: config
+    on_press:
+      - lambda: |-
+          if (!isnan(id(mq_volts).state)) {
+            id(baseline) = id(mq_volts).state;
+            ESP_LOGI("air", "Baseline set to %.2f V", id(baseline));
+          }
+
+number:
+  - platform: template
+    name: "Bad Air Threshold"   # air counts as bad above this % of baseline
+    id: bad_threshold
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: 140
+    min_value: 110
+    max_value: 300
+    step: 5
+    unit_of_measurement: "%"
+
+# ---------- Bad-air logic (runs on the device, works even if HA is down) ----------
+interval:
+  - interval: 10s
+    then:
+      - lambda: |-
+          if (!id(warmed_up) || id(baseline) <= 0 || isnan(id(mq_volts).state)) return;
+          float pct = id(mq_volts).state / id(baseline) * 100.0;
+          float bad_at   = id(bad_threshold).state;
+          float clear_at = 100.0 + (bad_at - 100.0) / 2.0;   // hysteresis
+          if (!id(bad_air) && pct > bad_at) {
+            ESP_LOGI("air", "Bad air (%.0f%%)", pct);
+            id(bad_air) = true;
+          } else if (id(bad_air) && pct < clear_at) {
+            ESP_LOGI("air", "Air cleared (%.0f%%)", pct);
+            id(bad_air) = false;
+          }

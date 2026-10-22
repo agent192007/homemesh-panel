@@ -17,18 +17,23 @@
 #define LV_COLOR_DEPTH 16
 #define LV_COLOR_16_SWAP 0
 
-/* Memory: no PSRAM on this board, keep LVGL's heap modest.
- * Drawing takes temporary buffers from this pool (radius masks, and a
- * map per gradient if any come back), so the peak is higher than what
- * the built widgets alone use. main.cpp logs the real peak (max_used)
- * - size this from that.
+/* Memory: no PSRAM on this board. Every widget comes out of this pool,
+ * and so do the temporary buffers drawing takes (radius masks,
+ * animations), so the peak is higher than what the built widgets alone
+ * use. main.cpp logs the real peak (max_used) - size this from that.
  *
- * It cannot simply grow: env:ha's static DRAM is within ~1.5KB of the
- * linker's limit (dram0_0_seg), and 48KB here fails to link there.
- * If the peak says more is needed, take the pool from the heap at
- * boot (LV_MEM_POOL_ALLOC) instead of from .bss. */
+ * Taken from the heap once at boot (LV_MEM_POOL_ALLOC), not .bss. It
+ * was a 40 KB static array until 22 Oct: env:ha's static DRAM sits
+ * within ~1.5 KB of the linker's limit (dram0_0_seg), so it could not
+ * grow there, and a 10-device layout ran it out (an assert in
+ * lv_anim.c at boot - a restart loop on the board). On the heap the
+ * pool can be 64 KB for a net cost of 24 KB: the 40 KB the array used
+ * returns to the heap, which had ~160 KB free. The designer's
+ * simulator builds against this file, so its pool matches. */
 #define LV_MEM_CUSTOM 0
-#define LV_MEM_SIZE (40U * 1024U)
+#define LV_MEM_SIZE (64U * 1024U)
+#define LV_MEM_POOL_INCLUDE <stdlib.h>
+#define LV_MEM_POOL_ALLOC malloc
 
 /* A failed LVGL assert - most often an allocation from the pool above
  * - used to run LVGL's default handler, while(1). That freezes the

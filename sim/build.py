@@ -76,10 +76,21 @@ def sources():
     return srcs
 
 
+# The project's own headers - lv_conf.h above all - change what every
+# object compiles to without changing any source file, so their content
+# is part of every cache key. (The cache once kept a 40 KB LVGL pool
+# after lv_conf.h asked for 64 KB, and the simulator said nothing.)
+_ROOT = Path(__file__).resolve().parent.parent
+HEADERS_HASH = hashlib.sha1(b"".join(
+    f.read_bytes() for f in sorted([*(_ROOT / "include").glob("*.h"), *(_ROOT / "src").rglob("*.h"),
+                                     *(Path(__file__).resolve().parent / "shim").glob("*.h")]))).hexdigest()
+
+
 def obj_for(src, flags):
-    # Cache key: the source path and the flags. Headers are not tracked,
-    # so --clean after editing lv_conf.h or a shared header.
-    h = hashlib.sha1((str(src) + " ".join(flags)).encode()).hexdigest()[:12]
+    # Cache key: the source path, the flags, and the project headers.
+    # LVGL's and ArduinoJson's own headers are not tracked - they only
+    # change with a library upgrade; --clean after one.
+    h = hashlib.sha1((str(src) + " ".join(flags) + HEADERS_HASH).encode()).hexdigest()[:12]
     return CACHE / f"{src.stem}-{h}.o"
 
 

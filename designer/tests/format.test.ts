@@ -25,6 +25,11 @@ interface Case {
   sensorPages?: Record<string, string>;
   actionColors?: Record<string, string>;
 }
+// The saved layout follows whatever the user last pushed, which can name
+// devices the stored snapshot predates (the ESPHome boards, 22 Oct). The
+// cases built from it only need ids the snapshot has.
+const snapIds = new Set(snap.states.map((s: any) => s.entity_id));
+saved.entities = saved.entities.filter((e: any) => snapIds.has(e.id));
 const savedIds = saved.entities.map((e: any) => e.id);
 const cases: Case[] = [
   { name: "everything controllable", include: null, favourite: ["light.bed_light"], automations: null,

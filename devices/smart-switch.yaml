@@ -1,0 +1,105 @@
+# Smart switch - ESP32 + 4-channel relay module + 4x TTP223 touch
+esphome:
+  name: smart-switch
+  friendly_name: Smart Switch
+
+esp32:
+  board: esp32dev
+
+logger:
+
+api:
+  encryption:
+    key: !secret smart_switch_api_key
+
+ota:
+  - platform: esphome
+    encryption:
+      key: !secret smart_switch_api_key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  manual_ip:
+    static_ip: 192.168.137.202
+    gateway: 192.168.137.1
+    subnet: 255.255.255.0
+
+# ---------- Relays (module is active-low, hence inverted) ----------
+switch:
+  - platform: gpio
+    id: relay1
+    name: "Ventilation Fan"
+    pin:
+      number: GPIO26
+      inverted: true
+    restore_mode: ALWAYS_OFF
+  - platform: gpio
+    id: relay2
+    name: "Relay 2"
+    pin:
+      number: GPIO25
+      inverted: true
+    restore_mode: ALWAYS_OFF
+  - platform: gpio
+    id: relay3
+    name: "Relay 3"
+    pin:
+      number: GPIO33
+      inverted: true
+    restore_mode: ALWAYS_OFF
+  - platform: gpio
+    id: relay4
+    name: "Relay 4"
+    pin:
+      number: GPIO32
+      inverted: true
+    restore_mode: ALWAYS_OFF
+
+# ---------- Touch pads (TTP223, momentary, active-high) ----------
+# Local control: works even if Home Assistant or WiFi is down.
+binary_sensor:
+  - platform: gpio
+    pin: GPIO34
+    id: touch1
+    internal: true
+    filters:
+      - delayed_on: 50ms    # ignores glitches
+    on_press:
+      - switch.toggle: relay1
+  - platform: gpio
+    pin: GPIO35
+    id: touch2
+    internal: true
+    filters:
+      - delayed_on: 50ms
+    on_press:
+      - switch.toggle: relay2
+  - platform: gpio
+    pin: GPIO36
+    id: touch3
+    internal: true
+    filters:
+      - delayed_on: 50ms    # also filters the GPIO36 WiFi glitch
+    on_press:
+      - switch.toggle: relay3
+  - platform: gpio
+    pin: GPIO39
+    id: touch4
+    internal: true
+    filters:
+      - delayed_on: 50ms    # also filters the GPIO39 WiFi glitch
+    on_press:
+      - switch.toggle: relay4
+
+# Battery % - every ADC1 pin is in use on this board. If you add it:
+# move touch 4 to GPIO16 (change "pin: GPIO39" above to "pin: GPIO16"),
+# wire the 100k + 100k divider to GPIO39, then uncomment:
+# sensor:
+#   - platform: adc
+#     pin: GPIO39
+#     name: "Battery Voltage"
+#     attenuation: 12db
+#     update_interval: 60s
+#     filters:
+#       - multiply: 2.0

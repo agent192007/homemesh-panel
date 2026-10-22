@@ -170,6 +170,40 @@ anything to the layout. Preflight passed in full. No theme on the panel.
   6,488 B free at boot, largest block 5,804** - about half the 5-device
   layout's. Run `tests/stress_sim.mjs` on it once it is saved.
 
+**22 Oct, evening: the LVGL pool is 64 KB on the heap.** The user's
+9-device layout left 6.5 KB free at boot, and adding a fan made the
+designer go blank: the simulator hit `ASSERT ... lv_anim.c:90` (pool
+exhausted) and exited - and the board would have restart-looped on that
+layout; even the 9-device one crashed in a full screen walk. Now
+`LV_MEM_POOL_ALLOC malloc`, `LV_MEM_SIZE 64 KB` in `include/lv_conf.h`:
+static RAM fell 123,304 -> 82,248 B, so the heap pays only ~24 KB net.
+Worst case free in `tests/stress_sim.mjs`: 25.1 KB (user's layout),
+20.3 KB (+fan), 2.1 KB for the largest layout the format allows (12
+devices all favourites, 6 pages, 8 automations). **Built, saved as
+`../homemesh_ha_firmware_22oct.bin` (SHA-256 `e0d0ece1...`), NOT yet
+flashed** (board unplugged): check `[mem] UI built` and the heap's
+`low` in the boot log after flashing - Wi-Fi and the WebSocket now share
+~140 KB instead of ~160 KB.
+- The designer no longer goes blank when a layout is too big: the
+  simulator boots a new layout and draws a few frames before swapping it
+  in, a crash there or later is caught, and the verdict says the panel
+  would run out of graphics memory and blocks Push. An accepted layout
+  shows its free pool, flagged under 14 KB (walking every screen costs
+  6-9 KB more than the first draw).
+- `sim/build.py`'s object cache now keys on the project headers too. It
+  ignored them, so editing `lv_conf.h` left a 40 KB pool in the
+  simulator with no sign of it.
+
+**`devices/`: the user's ESPHome boards** (22 Oct). `smart-switch.yaml`
+(4 relays + touch pads, 192.168.137.202) and `air-monitor.yaml` (MQ-135
++ DHT11, .201; its servo removed at the user's request). `setup.ps1`
+makes `devices/.venv` with ESPHome 2026.9.1 (Python 3.14 works),
+`flash.ps1 <device> [COMx]` flashes by USB or OTA. `secrets.yaml` is
+gitignored. Both configs pass `esphome config`; neither compiled or
+flashed here. The access point's `MAX_CLIENTS` is 4 - panel, laptop and
+these two exactly. The HA log's `switch.smart_switch_* missing`
+warnings were taps on those relays while the board was unreachable.
+
 **Open on 22 Oct: the hotspot link to the panel is lossy.** The user
 reported the panel "does not connect back" after a push. Measured: the
 laptop's link to its router is clean (0% loss, 7 ms) but pings to the
@@ -567,7 +601,8 @@ it** — `ha_client.*` presents the same three-function interface as
 - **Touch coordinates need rotating** to match `tft.setRotation()`.
   Taps landing mirrored or on the wrong axis is a rotation mismatch,
   not a broken touch driver.
-- **`LV_MEM_SIZE` is a fixed 40 KB pool, and it cannot simply grow.**
+- **`LV_MEM_SIZE` is a fixed pool - 64 KB from the heap since 22 Oct
+  (it was 40 KB in `.bss`; the notes below are from then).**
   Built widgets come out of it, and so do the temporary buffers drawing
   takes. A failed allocation used to be a silent freeze — LVGL's
   default assert handler is `while(1)` — and since 18 Oct

@@ -1,0 +1,5 @@
+# Wi-Fi password and API keys
+secrets.yaml
+# ESPHome's build output and the local Python environment
+.esphome/
+.venv/

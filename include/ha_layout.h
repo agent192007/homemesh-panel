@@ -8,8 +8,9 @@
 // Entities carry an icon name; layout_store.cpp checks this.
 #define HA_LAYOUT_HAS_ICONS 1
 
-#define HA_AREA_COUNT 3
+#define HA_AREA_COUNT 4
 static const char *HA_AREAS[] = {
+  "Relay_Module",
   "Bedroom",
   "Kitchen",
   "Living Room",
@@ -24,13 +25,17 @@ struct HaEntityCfg {
   const char *icon;
 };
 
-#define HA_ENTITY_COUNT 5
+#define HA_ENTITY_COUNT 9
 static const HaEntityCfg HA_ENTITIES[] = {
-  { "switch.ac", "AC", EntityKind::Toggle, 0, false, "plug" },
-  { "light.bed_light", "Bed Light", EntityKind::RGB, 0, true, "light" },
-  { "light.kitchen_lights", "Kitchen Lights", EntityKind::RGB, 1, false, "light" },
-  { "light.ceiling_lights", "Ceiling Lights", EntityKind::RGB, 2, true, "light" },
-  { "light.living_room_rgbww_lights", "Living Room RGBWW Lights", EntityKind::RGB, 2, true, "light" },
+  { "switch.smart_switch_ventilation_fan", "Relay 1", EntityKind::Toggle, 0, false, "plug" },
+  { "switch.smart_switch_relay_2", "Relay 2", EntityKind::Toggle, 0, false, "plug" },
+  { "switch.smart_switch_relay_3", "Relay 3", EntityKind::Toggle, 0, false, "plug" },
+  { "switch.smart_switch_relay_4", "Relay 4", EntityKind::Toggle, 0, false, "plug" },
+  { "switch.ac", "AC", EntityKind::Toggle, 1, false, "plug" },
+  { "light.bed_light", "Bed Light", EntityKind::RGB, 1, true, "light" },
+  { "light.kitchen_lights", "Kitchen Lights", EntityKind::RGB, 2, false, "light" },
+  { "light.ceiling_lights", "Ceiling Lights", EntityKind::RGB, 3, true, "light" },
+  { "light.living_room_rgbww_lights", "Living Room RGBWW Lights", EntityKind::RGB, 3, true, "light" },
 };
 
 struct HaActionCfg {
@@ -55,6 +60,6 @@ struct HaSensorCfg {
 
 #define HA_SENSOR_COUNT 2
 static const HaSensorCfg HA_SENSORS[] = {
-  { "sensor.outside_temperature", 2, false },
-  { "sensor.outside_humidity", 2, true },
+  { "sensor.outside_temperature", 0, false },
+  { "sensor.outside_humidity", 0, true },
 };

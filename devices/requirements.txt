@@ -1,0 +1,2 @@
+# Pinned: a release a few weeks old rather than the newest.
+esphome==2026.9.1
