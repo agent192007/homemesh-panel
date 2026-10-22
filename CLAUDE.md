@@ -126,6 +126,18 @@ the user's request** (commit `f02f41d`, reverted by the next one): Web
 Serial + esptool-js, a whole-board image written by a post-build script.
 It worked on the board. To bring it back, revert the revert.
 
+**Presentation state, 22 Oct.** Panel flashed (app only) with the 21 Oct
+firmware from a clean tree and pushed the demo layout: the same five
+devices plus **four automations in their own colours** (All Off
+#E5484D, Goodnight #5B5BD6, Movie Night #8E4EC6, Welcome Home #30A46C),
+saved to `include/ha_layout.*`. Watched on serial: push received,
+stored, restart, reconnected and logged in. Boot memory with it: 11,860 B
+free, largest block 11,176. **Six automations cost too much pool**:
+`designer/tests/stress_sim.mjs` (walks every screen in the simulator,
+which has the panel's 40 KB pool, and reports the least free) gave 5,020
+B with six, 7,316 B with four, 11,760 B with none. Run it after adding
+anything to the layout. Preflight passed in full. No theme on the panel.
+
 **Open on 22 Oct: the hotspot link to the panel is lossy.** The user
 reported the panel "does not connect back" after a push. Measured: the
 laptop's link to its router is clean (0% loss, 7 ms) but pings to the

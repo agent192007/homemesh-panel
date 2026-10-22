@@ -1370,11 +1370,15 @@ callout("The board is running the 21 October firmware", [
     "\"Before the presentation\".",
     "The new designer's Push sends the same event as the old tool (tested byte for byte), but nobody has yet "
     "watched a push from <i>the new designer</i> arrive on the board. Do it once with the serial monitor open "
-    "and look for <c>[layout] push received</c> then <c>[layout] loaded from NVS</c>.",
+    "and look for <c>[layout] push received</c> then <c>[layout] loaded from NVS</c>. (A push of the same "
+    "event, sent the way the designer sends it, was watched arriving on 22 October.)",
     "The demo installation now has six for the Automations screen (added 21 October): scenes Movie Night and "
     "Bright, scripts All Off and Goodnight, automations Evening Lights and Welcome Home. Welcome Home is the "
     "one to show: turning the Panel Demo Switch on from the panel makes Home Assistant switch on the ceiling "
-    "and entrance lights. Tick them in the designer and push to put them on the panel.",
+    "and entrance lights. <b>The panel has four of them, each in its own colour</b> (All Off, Goodnight, Movie "
+    "Night, Welcome Home; swipe up). Four fit one screen and keep the panel's graphics memory comfortable: "
+    "with all six the least free memory in a full walk of every screen fell to 5 KB, with four it stays above "
+    "7 KB.",
 ])
 h2("Two quirks that may be noticed, and how to answer")
 table(["If someone notices", "The answer"], [

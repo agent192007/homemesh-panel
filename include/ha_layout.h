@@ -38,9 +38,12 @@ struct HaActionCfg {
   const char *name;
 };
 
-#define HA_ACTION_COUNT 0
+#define HA_ACTION_COUNT 4
 static const HaActionCfg HA_ACTIONS[] = {
-  { "", "" },
+  { "script.all_off", "All Off" },
+  { "script.goodnight", "Goodnight" },
+  { "scene.movie_night", "Movie Night" },
+  { "automation.welcome_home", "Welcome Home" },
 };
 
 // Header-bar sensors, one temperature and one humidity per area.
