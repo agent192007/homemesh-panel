@@ -50,7 +50,7 @@ and paste its API key.
 
   ```powershell
   devices\.venv\Scripts\python.exe -m esptool --chip esp32 --port COM3 --baud 115200 --no-stub `
-      write-flash -z --flash-size detect 0x0 devices\.esphomeuildir-monitoruildirmware.factory.bin
+      write-flash -z --flash-size detect 0x0 devices\.esphome\build\air-monitor\build\firmware.factory.bin
   ```
 
   Or unplug the MQ-135 while flashing, or use a shorter cable.
