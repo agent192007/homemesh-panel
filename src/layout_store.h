@@ -59,6 +59,9 @@ struct Layout {
   uint8_t ent_n;
   uint8_t act_n;
   uint8_t sens_n;
+  // A binary sensor shown in the status bar as green "Good" / red "Bad",
+  // or nullptr for none.
+  const char *status;
   bool from_nvs;       // false = running off the compiled fallback
 };
 

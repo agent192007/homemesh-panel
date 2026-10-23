@@ -213,3 +213,4 @@ button.small { padding: 2px 8px; font-size: 12px; }
 .auto-colour input[type=color]:not(.set) { opacity: 0.5; }
 .auto-colour .soft { width: 34px; }
 .sim-crash { color: var(--bad); background: color-mix(in srgb, var(--bg) 88%, transparent); }
+.kind.Status { color: var(--ok); }

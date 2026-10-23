@@ -23,6 +23,7 @@ interface Sel {
   sensorPages: Record<string, string>;
   extraPages: string[];       // pages made here that have no device yet
   actionColors: Record<string, string>;   // automation -> "#RRGGBB" button colour
+  headerStatus: string;       // binary sensor shown in the status bar as Good/Bad, "" for none
 }
 
 function selFromLayout(l: Layout): Sel {
@@ -39,6 +40,7 @@ function selFromLayout(l: Layout): Sel {
     sensorPages: Object.fromEntries(l.sensors.map((s) => [s.id, l.areas[s.area]])),
     extraPages: [],
     actionColors: Object.fromEntries(l.actions.filter((a) => a.color).map((a) => [a.id, a.color!])),
+    headerStatus: l.status ?? "",
   };
 }
 
@@ -88,7 +90,7 @@ export default function App() {
   const [client, setClient] = useState<HaClient | null>(null);
   const [inv, setInv] = useState<Inventory | null>(null);
   const [sel, setSel] = useState<Sel>({ include: new Set(), favourite: new Set(), order: [], icons: {}, names: {},
-    automations: new Set(), pages: {}, sensorPages: {}, extraPages: [], actionColors: {} });
+    automations: new Set(), pages: {}, sensorPages: {}, extraPages: [], actionColors: {}, headerStatus: "" });
   const [newPage, setNewPage] = useState("");
   const [theme, setTheme] = useState<Record<string, string>>({ ...THEME_DEFAULTS });
   const [saved, setSaved] = useState<Layout | null>(null);
@@ -156,8 +158,8 @@ export default function App() {
     include: sel.include, favourite: sel.favourite, automations: sel.automations, order: sel.order,
     icons: sel.icons, names: sel.names, pages: sel.pages, sensorPages: sel.sensorPages,
   }) : null, [inv, sel]);
-  const layout: Layout | null = useMemo(() => tables ? buildLayout(tables, theme, sel.actionColors) : saved,
-    [tables, theme, saved, sel.actionColors]);
+  const layout: Layout | null = useMemo(() => tables ? buildLayout(tables, theme, sel.actionColors, sel.headerStatus || undefined) : saved,
+    [tables, theme, saved, sel.actionColors, sel.headerStatus]);
   const json = useMemo(() => (layout ? dumpLayout(layout) : ""), [layout]);
   const simJson = useDebounced(json, 250);
   const bytes = new TextEncoder().encode(json).length;
@@ -188,13 +190,16 @@ export default function App() {
       const v = parseFloat(liveStates.current.get(s.id)?.s ?? "");
       if (!Number.isNaN(v)) ev.push({ type: s.hum ? Ev.Humidity : Ev.Temperature, entity: s.area, value: 0, fvalue: v });
     });
+    if (layout.status) ev.push({ type: Ev.HeaderStatus, entity: 0,
+      value: live ? statusValue(liveStates.current.get(layout.status)?.s) : 0 });
     return ev;
   }, [layout, live]);
 
   // ---------------------------------------------------------------- live
   useEffect(() => {
     if (!live || !client || !layout) return;
-    const ids = [...layout.entities.map((e) => e.id), ...layout.sensors.map((s) => s.id)];
+    const ids = [...layout.entities.map((e) => e.id), ...layout.sensors.map((s) => s.id),
+      ...(layout.status ? [layout.status] : [])];
     let unsub: (() => void) | null = null;
     client.subscribe("subscribe_entities", { entity_ids: ids }, (event) => {
       const apply = (eid: string, body: any) => {
@@ -210,6 +215,8 @@ export default function App() {
         const i = layout.entities.findIndex((e) => e.id === eid);
         const level = pct > 0 ? st.brightness : eid.startsWith("fan.") ? undefined : body.a?.brightness;
         if (i >= 0) for (const e of stateEvents(i, { s: body.s, brightness: level, rgb: body.a?.rgb_color })) sim.current?.post(e);
+        if (eid === layout.status && body.s !== undefined)
+          sim.current?.post({ type: Ev.HeaderStatus, entity: 0, value: statusValue(body.s) });
         layout.sensors.forEach((s) => {
           const v = parseFloat(body.s);
           if (s.id === eid && !Number.isNaN(v)) sim.current?.post({ type: s.hum ? Ev.Humidity : Ev.Temperature, entity: s.area, value: 0, fvalue: v });
@@ -263,7 +270,7 @@ export default function App() {
     try {
       let saved = "";
       if (tables && project) {
-        await bridge.saveLayout(json, buildHeader(tables));
+        await bridge.saveLayout(json, buildHeader(tables, sel.headerStatus || undefined));
         setBaseline(json);
         setSaved(layout);
         savedRef.current = layout;
@@ -276,7 +283,7 @@ export default function App() {
   async function save() {
     if (!tables || !layout) return;
     try {
-      const where = await bridge.saveLayout(json, buildHeader(tables));
+      const where = await bridge.saveLayout(json, buildHeader(tables, sel.headerStatus || undefined));
       setBaseline(json);
       setSaved(layout);
       savedRef.current = layout;
@@ -371,7 +378,9 @@ export default function App() {
   function titleProblem(name: string, hasSensors: boolean): string | null {
     const w = sim.current?.textWidth(name, 20);
     if (w == null) return null;
-    const room = hasSensors ? 282 - (sim.current?.textWidth("88.8°C  88%", 14) ?? 80) : 288;
+    // The Good/Bad block: its text, 5 px padding each side, 6 px gap.
+    const block = layout?.status ? (sim.current?.textWidth("Good", 14) ?? 36) + 16 : 0;
+    const room = (hasSensors ? 282 - (sim.current?.textWidth("88.8°C  88%", 14) ?? 80) : 288) - block;
     if (w <= room) return null;
     return hasSensors ? "Too long for the header: it will run into the temperature" : "Too long for the header: it will run off the screen";
   }
@@ -498,6 +507,17 @@ export default function App() {
                   </div>
                 );
               })}
+              <div className="ent sensor-row status-row">
+                <div className="ent-name">
+                  <div>Status block</div>
+                  <code>green "Good" / red "Bad" in the status bar, on every page</code>
+                </div>
+                <select className={`page-pick ${sel.headerStatus ? "custom" : ""}`} value={sel.headerStatus}
+                  onChange={(e) => { const v = e.target.value; setSel((s) => ({ ...s, headerStatus: v })); }}>
+                  <option value="">None</option>
+                  {inv.controllable.filter((r) => r.kind === "Status").map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
+              </div>
             </div>
           )}
           {inv && (
@@ -556,7 +576,8 @@ export default function App() {
             <p className="hint">Drag tiles to reorder, or onto another page to move them; arrows move a whole page. Click a page or device name to rename it — clear a device's name to use Home Assistant's.</p>
             {pages.map((p, pi) => {
               const custom = pi > 0 && !haRoomNames.has(p.name);
-              const title = pi > 0 ? titleProblem(p.name, layout?.sensors.some((s) => s.area === p.area) ?? false) : null;
+              // Pages with no sensor of their own show the average of all.
+              const title = pi > 0 ? titleProblem(p.name, (layout?.sensors.length ?? 0) > 0) : null;
               return (
               <div key={p.name + pi} className="page" onDragOver={(ev) => { if (pi > 0) ev.preventDefault(); }}
                 onDrop={(ev) => { if (pi > 0 && ev.target === ev.currentTarget) dropOnPage(p.name); }}>
@@ -691,6 +712,11 @@ export default function App() {
 
 // Power/Brightness/Color events for one entity, as the firmware's
 // apply_entity_state() posts them: state optional, null brightness kept.
+// A binary sensor's state as the firmware's HeaderStatus value.
+function statusValue(s?: string): number {
+  return s === "on" ? 1 : s === "off" ? 0 : -1;
+}
+
 function stateEvents(i: number, st?: LiveState): SimEvent[] {
   if (!st) return [];
   const ev: SimEvent[] = [];

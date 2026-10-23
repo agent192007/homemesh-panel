@@ -133,12 +133,13 @@ static EntityKind kind_from(const char *s) {
   if (!s) return EntityKind::Toggle;
   if (strcmp(s, "RGB") == 0) return EntityKind::RGB;
   if (strcmp(s, "Dimmable") == 0) return EntityKind::Dimmable;
+  if (strcmp(s, "Status") == 0) return EntityKind::Status;
   return EntityKind::Toggle;
 }
 
 static bool kind_valid(const char *s) {
   return s && (strcmp(s, "RGB") == 0 || strcmp(s, "Dimmable") == 0 ||
-               strcmp(s, "Toggle") == 0);
+               strcmp(s, "Toggle") == 0 || strcmp(s, "Status") == 0);
 }
 
 // ------------------------------------------------------------
@@ -181,6 +182,10 @@ static void load_builtin() {
     g_layout.sens[i].area = HA_SENSORS[i].area;
     g_layout.sens[i].humidity = HA_SENSORS[i].humidity;
   }
+
+#ifdef HA_STATUS_ENTITY
+  g_layout.status = HA_STATUS_ENTITY;
+#endif
 
   // No pushed layout means no pushed theme either.
   theme_defaults(&g_theme);
@@ -269,6 +274,9 @@ static bool validate(JsonObjectConst root, char *err, size_t err_n) {
     need += strlen(id) + 1;
   }
 
+  const char *status = root["status"];
+  if (status && *status) need += strlen(status) + 1;
+
   if (need > ARENA_N)
     REJECT("layout needs %u bytes of names, arena is %u",
            (unsigned)need, (unsigned)ARENA_N);
@@ -331,6 +339,12 @@ static bool populate(JsonObjectConst root) {
     d.area = (uint8_t)(s["area"] | 0);
     d.humidity = s["hum"] | false;
     g_layout.sens_n++;
+  }
+
+  const char *status = root["status"];
+  if (status && *status) {
+    g_layout.status = intern(status);
+    if (!g_layout.status) return false;
   }
 
   apply_theme(root);

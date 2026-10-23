@@ -6,7 +6,7 @@
 //
 // "on" turns every dimmable light on at 72%; page N swipes left N times
 // from Home (0); "detail" taps the first tile's chevron to open the
-// detail panel. Mode "offline" is "on" with the Home page's first device
+// detail panel. Mode "bad" reports every Status sensor on. Mode "offline" is "on" with the Home page's first device
 // reported unavailable by Home Assistant.
 import { readFileSync, writeFileSync } from "node:fs";
 import createPanelSim from "../src/sim/panel_sim.mjs";
@@ -33,6 +33,8 @@ const lit = mode === "on" || mode === "offline";
 sim._sim_event(EV.Link, 0, 2, 0);
 sim._sim_event(EV.DevicesAvailable, 0, 1, 0);
 layout.entities.forEach((e, i) => {
+  // Status tiles (binary sensors): off = "Good", unless mode is "bad".
+  if (e.kind === "Status") { sim._sim_event(EV.Power, i, mode === "bad" ? 1 : 0, 0); return; }
   sim._sim_event(EV.Power, i, lit && e.kind !== "Toggle" ? 1 : 0, 0);
   if (e.kind !== "Toggle") sim._sim_event(EV.Brightness, i, 184, 0);
   if (e.kind === "RGB") sim._sim_event(EV.Color, i, 0xffa452, 0);
@@ -41,6 +43,7 @@ if (mode === "offline") {
   const first = Math.max(0, layout.entities.findIndex((e) => e.fav));
   sim._sim_event(EV.Availability, first, 0, 0);
 }
+if (layout.status) sim._sim_event(9, 0, mode === "bad" ? 1 : 0, 0);   // HeaderStatus
 layout.sensors.forEach((s) => sim._sim_event(s.hum ? EV.Humidity : EV.Temperature, s.area, 0, s.hum ? 54 : 15.6));
 
 // LVGL redraws on a 30 ms period in real time, so steps need real time.

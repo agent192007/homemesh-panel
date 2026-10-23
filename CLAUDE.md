@@ -206,6 +206,31 @@ flashed here. The access point's `MAX_CLIENTS` is 4 - panel, laptop and
 these two exactly. The HA log's `switch.smart_switch_* missing`
 warnings were taps on those relays while the board was unreachable.
 
+**23 Oct: the air monitor in the status bar; Status tiles.** User's
+request, panel flashed and the layout pushed the same day.
+- **Layout key `"status"`** (optional, top level): a binary sensor the
+  status bar shows as a small green "Good" / red "Bad" block on every
+  page, hidden while unknown or offline. `build_layout(status=)` /
+  `build_header(status=)` -> `#define HA_STATUS_ENTITY`, emitted only
+  when set, so older headers stand; designer: "Status block" chooser
+  under Header sensors. Firmware: `g_layout.status`, subscribed with the
+  rest, routed as `EventType::HeaderStatus` (1 bad, 0 good, -1 unknown).
+- **A page with no temperature/humidity of its own shows the average of
+  all pages' sensors**, so the one air monitor fills every header. The
+  designer's title-width warning counts the readings and the block.
+- **`EntityKind::Status`** (appended last): `binary_sensor`s, a read-only
+  tile, green "Good" off / red "Bad" on, no icon, taps ignored. In both
+  `classify()`s. The user did not want the air reading as a tile, so the
+  layout does not use one; the kind stays.
+- The layout now: the air monitor's temperature/humidity on Relay_Module
+  (demo "outside" pair hidden), status = its Bad Air. Boot: 30,848 B
+  pool free; heap low 135,876 B with Wi-Fi up; worst case in
+  `stress_sim.mjs` 24.9 KB.
+- `ESPHome`: the air monitor was added to HA through the config-flow API
+  (host .201, key from `devices/secrets.yaml`). Its first flash needed
+  `esptool --no-stub` (power dip at write start) and PowerShell, not Git
+  Bash (ESP-IDF refuses MSYS). See `devices/README.md`.
+
 **Open on 22 Oct: the hotspot link to the panel is lossy.** The user
 reported the panel "does not connect back" after a push. Measured: the
 laptop's link to its router is clean (0% loss, 7 ms) but pings to the

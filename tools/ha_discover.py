@@ -49,6 +49,9 @@ TOGGLE_DOMAINS = {"switch", "fan", "input_boolean"}
 # classed Dimmable, and the firmware maps its "percentage" to the level.
 FAN_SET_SPEED = 1
 LIGHT_DOMAIN = "light"
+# Read-only yes/no sensors, shown as a Status tile: green "Good" when off,
+# red "Bad" when on (the air monitor's Bad Air, a leak, a door left open).
+STATUS_DOMAINS = {"binary_sensor"}
 # Domains that behave as "run this", i.e. the Automations screen.
 ACTION_DOMAINS = {"scene", "script", "automation"}
 # Sensors the header bar can show, keyed by HA's own device_class.
@@ -179,6 +182,8 @@ def classify(state):
     domain = state["entity_id"].split(".", 1)[0]
     if domain == "fan" and int(state.get("attributes", {}).get("supported_features") or 0) & FAN_SET_SPEED:
         return "Dimmable"
+    if domain in STATUS_DOMAINS:
+        return "Status"
     if domain in TOGGLE_DOMAINS:
         return "Toggle"
     if domain == LIGHT_DOMAIN:
@@ -373,7 +378,7 @@ def c_str(s):
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def build_header(area_names, rows, acts, sensor_rows):
+def build_header(area_names, rows, acts, sensor_rows, status=None):
     """The compile-time path: include/ha_layout.h.
 
     Still the mechanism today. Once the panel stores a layout in NVS
@@ -434,10 +439,14 @@ def build_header(area_names, rows, acts, sensor_rows):
     if not sensor_rows:
         out.append('  { "", 0, false },')
     out += ["};", ""]
+    if status:
+        # The binary sensor the status bar shows as a green "Good" / red
+        # "Bad" block. Only emitted when chosen, so older headers stand.
+        out += [f"#define HA_STATUS_ENTITY {c_str(status)}", ""]
     return "\n".join(out)
 
 
-def build_layout(area_names, rows, acts, sensor_rows, theme=None, action_colors=None):
+def build_layout(area_names, rows, acts, sensor_rows, theme=None, action_colors=None, status=None):
     """The delivery format: what gets pushed to the panel and stored.
 
     Deliberately terse - short keys, no whitespace when serialised -
@@ -465,6 +474,10 @@ def build_layout(area_names, rows, acts, sensor_rows, theme=None, action_colors=
             for eid, area, is_hum in sensor_rows
         ],
     }
+    # Optional: a binary sensor the status bar shows as a green "Good" /
+    # red "Bad" block on every page (the air monitor's Bad Air).
+    if status:
+        out["status"] = status
 
     # Only colours that differ from the compiled defaults are sent.
     # The firmware treats a missing colour as "keep the default", so

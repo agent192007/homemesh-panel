@@ -113,7 +113,8 @@ static void apply_entity_state(uint8_t i, const char *state, JsonVariantConst at
     if (available) post(EventType::Power, i, strcmp(state, "on") == 0);
   }
 
-  if (g_layout.ents[i].kind == EntityKind::Toggle) return;
+  if (g_layout.ents[i].kind == EntityKind::Toggle ||
+      g_layout.ents[i].kind == EntityKind::Status) return;
   if (attrs.isNull()) return;
 
   // A fan's speed is "percentage", 0-100, and null while it is off; the
@@ -158,7 +159,16 @@ static void apply_one(const char *eid, const char *state, JsonVariantConst attrs
     return;
   }
   i = sensor_index(eid);
-  if (i >= 0) apply_sensor_state(i, state);
+  if (i >= 0) {
+    apply_sensor_state(i, state);
+    return;
+  }
+  // The status bar's good/bad sensor. A change with no "s" moved only
+  // an attribute, which says nothing about good or bad.
+  if (g_layout.status && state && strcmp(g_layout.status, eid) == 0) {
+    int v = strcmp(state, "on") == 0 ? 1 : strcmp(state, "off") == 0 ? 0 : -1;
+    post(EventType::HeaderStatus, 0, v);
+  }
 }
 
 // ------------------------------------------------------------
@@ -193,10 +203,11 @@ static void send_subscribe_entities() {
   int n = snprintf(sub_buf, sub_n,
                    "{\"id\":%u,\"type\":\"subscribe_entities\",\"entity_ids\":[",
                    ID_SUBSCRIBE);
-  uint8_t total = g_layout.ent_n + g_layout.sens_n, sent = 0;
+  uint8_t total = g_layout.ent_n + g_layout.sens_n + (g_layout.status ? 1 : 0), sent = 0;
   for (uint8_t k = 0; k < total; k++) {
     const char *id = k < g_layout.ent_n ? g_layout.ents[k].id
-                                        : g_layout.sens[k - g_layout.ent_n].id;
+                   : k < g_layout.ent_n + g_layout.sens_n ? g_layout.sens[k - g_layout.ent_n].id
+                                                          : g_layout.status;
     if ((size_t)n + strlen(id) + 8 >= sub_n) break;  // room for "]}"
     n += snprintf(sub_buf + n, sub_n - n, "%s\"%s\"", sent ? "," : "", id);
     sent++;

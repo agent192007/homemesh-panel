@@ -69,7 +69,8 @@ struct TileUI {
   lv_obj_t *tile;
   lv_obj_t *state;
   lv_obj_t *bar;   // mini brightness bar, NULL for Toggle
-  lv_obj_t *icon;  // lit on LV_STATE_CHECKED; see refresh_entity
+  lv_obj_t *icon;  // lit on LV_STATE_CHECKED; see refresh_entity; NULL for Status
+  lv_obj_t *name;
 };
 
 static TileUI tiles[MAX_TILES];
@@ -107,6 +108,10 @@ static bool input_captured;
 static lv_obj_t *title_label;
 static lv_obj_t *sensor_label;
 static lv_obj_t *status_dot;
+// The layout's status sensor as a small green "Good" / red "Bad" block,
+// left of the readings. Hidden while unknown, or with no status sensor.
+static lv_obj_t *status_badge;
+static int8_t header_status = -1;
 
 // Single reused detail panel - one colour wheel for the whole UI
 // rather than one per RGB device.
@@ -167,7 +172,7 @@ static void style_card(lv_obj_t *o) {
 static int pct_of(uint8_t v) { return (v * 100 + 127) / 255; }
 
 static bool has_extras(const EntityDesc *d) {
-  return d->kind != EntityKind::Toggle;
+  return d->kind == EntityKind::Dimmable || d->kind == EntityKind::RGB;
 }
 
 // ------------------------------------------------------------
@@ -233,6 +238,7 @@ static void close_detail_cb(lv_event_t *e) {
 // ------------------------------------------------------------
 static void toggle_cb(lv_event_t *e) {
   uint8_t i = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
+  if (transport_entity(i)->kind == EntityKind::Status) return;   // a sensor, not a control
   transport_send_power(i, !power[i]);
 }
 
@@ -315,10 +321,36 @@ static void gesture_cb(lv_event_t *e) {
 // ------------------------------------------------------------
 //  Refresh
 // ------------------------------------------------------------
+// A Status tile is the whole tile in one colour: green "Good" when the
+// sensor is off, red "Bad" when it is on, the plain tile colour while
+// unknown or offline. The text goes dark on a bright fill, as on the
+// automation buttons. Only the default state is styled: a Status tile is
+// never CHECKED, so the ON lift does not apply.
+static void refresh_status(uint8_t i) {
+  bool known_state = avail[i] && known[i];
+  lv_color_t fill = !known_state ? COL_TILE : (power[i] ? COL_BAD : COL_OK);
+  lv_color_t ink = !known_state ? COL_TEXT
+                 : (lv_color_brightness(fill) > 160 ? lv_color_hex(0x101418) : lv_color_white());
+  const char *word = !avail[i] ? "Offline" : !known[i] ? "--" : (power[i] ? "Bad" : "Good");
+  for (uint8_t t = 0; t < tile_n; t++) {
+    if (tiles[t].entity != i) continue;
+    lv_obj_set_style_bg_color(tiles[t].tile, fill, 0);
+    lv_obj_set_style_border_color(tiles[t].tile, shade(fill, CARD_EDGE), 0);
+    lv_obj_set_style_text_color(tiles[t].state, ink, 0);
+    lv_obj_set_style_text_color(tiles[t].name, ink, 0);
+    lv_label_set_text(tiles[t].state, word);
+  }
+}
+
 static void refresh_entity(uint8_t i) {
   const EntityDesc *d = transport_entity(i);
   // Not lit while unavailable: HA's last word on power is stale.
   bool on = avail[i] && known[i] && power[i];
+
+  if (d->kind == EntityKind::Status) {
+    refresh_status(i);
+    return;
+  }
 
   // A dimmable that is on reads its level, "72%", instead of "ON".
   // The amber reading and the lit icon already say it is on, and the
@@ -404,15 +436,17 @@ static void refresh_header() {
     lv_label_set_text(sensor_label, s);
     lv_obj_set_style_text_color(sensor_label, col, 0);
   } else {
-    // Room pages show that room's sensors; Home and Automations show
-    // the average across every room that has reported.
+    // Room pages show that room's sensors; Home, Automations, and a room
+    // with no sensor of its own show the average across every room that
+    // has reported - so one sensor (the air monitor) fills every page.
     float t_sum = 0, h_sum = 0;
     uint8_t t_cnt = 0, h_cnt = 0;
     if (cur_screen == scr_devices && dev_page > 0) {
       uint8_t a = dev_page - 1;
       if (area_temp_ok[a]) { t_sum = area_temp[a]; t_cnt = 1; }
       if (area_hum_ok[a])  { h_sum = area_hum[a];  h_cnt = 1; }
-    } else {
+    }
+    if (!t_cnt && !h_cnt) {
       for (uint8_t a = 0; a < area_n; a++) {
         if (area_temp_ok[a]) { t_sum += area_temp[a]; t_cnt++; }
         if (area_hum_ok[a])  { h_sum += area_hum[a];  h_cnt++; }
@@ -430,6 +464,20 @@ static void refresh_header() {
     lv_obj_set_style_text_color(sensor_label, COL_MUTED, 0);
   }
   lv_obj_align_to(sensor_label, status_dot, LV_ALIGN_OUT_LEFT_MID, -6, 0);
+
+  if (!en || header_status < 0) {
+    lv_obj_add_flag(status_badge, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_color_t fill = header_status ? COL_BAD : COL_OK;
+    lv_label_set_text(status_badge, header_status ? "Bad" : "Good");
+    lv_obj_set_style_bg_color(status_badge, fill, 0);
+    lv_obj_set_style_text_color(status_badge,
+        lv_color_brightness(fill) > 160 ? lv_color_hex(0x101418) : lv_color_white(), 0);
+    lv_obj_clear_flag(status_badge, LV_OBJ_FLAG_HIDDEN);
+    // Beside the readings, or beside the dot when there are none.
+    bool readings = lv_label_get_text(sensor_label)[0] != '\0';
+    lv_obj_align_to(status_badge, readings ? sensor_label : status_dot, LV_ALIGN_OUT_LEFT_MID, -6, 0);
+  }
 }
 
 // ------------------------------------------------------------
@@ -454,6 +502,13 @@ static void create_header() {
 
   title_label = make_label(bar, "Home", &lv_font_montserrat_20, COL_TEXT);
   lv_obj_align(title_label, LV_ALIGN_LEFT_MID, GAP, 0);
+
+  status_badge = make_label(bar, "", &lv_font_montserrat_14, COL_TEXT);
+  lv_obj_set_style_bg_opa(status_badge, LV_OPA_COVER, 0);
+  lv_obj_set_style_radius(status_badge, 4, 0);
+  lv_obj_set_style_pad_hor(status_badge, 5, 0);
+  lv_obj_set_style_pad_ver(status_badge, 1, 0);
+  lv_obj_add_flag(status_badge, LV_OBJ_FLAG_HIDDEN);
 
   status_dot = lv_obj_create(bar);
   lv_obj_set_size(status_dot, 10, 10);
@@ -554,7 +609,10 @@ static void create_device_tile(lv_obj_t *parent, uint8_t i,
   // every tile. A font glyph, not an image: it draws like text out of
   // flash and costs nothing from LVGL's 40KB pool, which is why icons
   // are a font here rather than PNGs on the SD card.
-  lv_obj_t *ic = lv_label_create(t);
+  // A Status tile has no icon: the whole tile is the signal.
+  const bool status = d->kind == EntityKind::Status;
+  lv_obj_t *ic = status ? NULL : lv_label_create(t);
+  if (ic) {
   lv_label_set_text(ic, icon_glyph(d->icon));
   lv_obj_set_style_text_font(ic, roomy ? &panel_icons_28 : &panel_icons_18, 0);
   lv_obj_set_style_text_color(ic, COL_ACCENT, 0);
@@ -575,6 +633,7 @@ static void create_device_tile(lv_obj_t *parent, uint8_t i,
   // name instead of colliding with both.
   if (roomy) lv_obj_align(ic, LV_ALIGN_LEFT_MID, 0, -2);
   else lv_obj_align(ic, LV_ALIGN_TOP_LEFT, 0, -3);
+  }
 
   // One line, cut with "..." - which needs a height as well as a width.
   // With only a width LVGL wraps instead, and a second line of a long
@@ -583,7 +642,7 @@ static void create_device_tile(lv_obj_t *parent, uint8_t i,
   // can give a device a shorter name to avoid the dots.
   lv_obj_t *name = lv_label_create(t);
   lv_label_set_text(name, d->name);
-  const lv_coord_t name_x = roomy ? 0 : 26;
+  const lv_coord_t name_x = (roomy || status) ? 0 : 26;
   lv_obj_set_size(name, w - (has_extras(d) ? 54 : 22) - name_x,
                   lv_font_get_line_height(lv_obj_get_style_text_font(name, LV_PART_MAIN)));
   lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
@@ -635,6 +694,7 @@ static void create_device_tile(lv_obj_t *parent, uint8_t i,
   tiles[tile_n].state = st;
   tiles[tile_n].bar = bar;
   tiles[tile_n].icon = ic;
+  tiles[tile_n].name = name;
   tile_n++;
 }
 
@@ -841,6 +901,10 @@ void dashboard_apply(const PanelEvent &e) {
         avail[e.entity] = e.value != 0;
         refresh_entity(e.entity);
       }
+      break;
+
+    case EventType::HeaderStatus:
+      header_status = (int8_t)e.value;
       break;
 
     case EventType::AutomationRan:

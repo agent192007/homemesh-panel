@@ -17,7 +17,9 @@ import type { Kind } from "./format";
 const TILE_W = 148;
 
 export function nameBox(kind: Kind, compact: boolean): number {
-  return TILE_W - (kind === "Toggle" ? 22 : 54) - (compact ? 26 : 0);
+  // Toggle and Status tiles have no chevron sharing the name's row.
+  // Compact tiles put the icon inline before the name; Status tiles have none.
+  return TILE_W - (kind === "Toggle" || kind === "Status" ? 22 : 54) - (compact && kind !== "Status" ? 26 : 0);
 }
 
 // Characters the panel's font cannot draw. LVGL skips them silently, so

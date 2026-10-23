@@ -25,6 +25,10 @@ enum class EntityKind : uint8_t {
   Toggle,     // on/off only
   Dimmable,   // on/off + brightness
   RGB,        // on/off + brightness + colour
+  // Last, so the values above keep their numbers. A read-only yes/no
+  // sensor (binary_sensor): a solid tile, green "Good" when off, red
+  // "Bad" when on. Taps do nothing.
+  Status,
 };
 
 enum class LinkState : uint8_t {
@@ -47,6 +51,9 @@ enum class EventType : uint8_t {
   // Assistant cannot reach the device, so it is drawn greyed out with
   // a disconnect glyph and takes no taps.
   Availability,      // entity, value = 1 / 0
+  // The layout's status sensor (the air monitor's Bad Air), shown in the
+  // status bar: value 1 = bad (red), 0 = good (green), -1 = unknown.
+  HeaderStatus,
 };
 
 struct PanelEvent {

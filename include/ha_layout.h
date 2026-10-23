@@ -60,6 +60,8 @@ struct HaSensorCfg {
 
 #define HA_SENSOR_COUNT 2
 static const HaSensorCfg HA_SENSORS[] = {
-  { "sensor.outside_temperature", 0, false },
-  { "sensor.outside_humidity", 0, true },
+  { "sensor.air_monitor_temperature", 0, false },
+  { "sensor.air_monitor_humidity", 0, true },
 };
+
+#define HA_STATUS_ENTITY "binary_sensor.air_monitor_bad_air"
