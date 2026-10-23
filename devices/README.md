@@ -41,6 +41,22 @@ it connects. After flashing, add it in Home Assistant: Settings >
 Devices & services > Add integration > ESPHome, host = its address,
 and paste its API key.
 
+## If flashing fails
+
+- **"No more data to read from the serial port" right after "Connecting"**:
+  the board is dipping on power as writing starts - the MQ-135's heater
+  draws ~150 mA from the same USB. Flash without esptool's stub, which
+  is slower but steadier (how the air monitor went on, 23 Oct):
+
+  ```powershell
+  devices\.venv\Scripts\python.exe -m esptool --chip esp32 --port COM3 --baud 115200 --no-stub `
+      write-flash -z --flash-size detect 0x0 devices\.esphomeuildir-monitoruildirmware.factory.bin
+  ```
+
+  Or unplug the MQ-135 while flashing, or use a shorter cable.
+- **"MSys/Mingw is not supported"** while installing ESP-IDF: ESPHome
+  was started from Git Bash. Use PowerShell (as `flash.ps1` does).
+
 ## Notes
 
 - **The ESP32 access point takes 4 devices** (`MAX_CLIENTS` in
